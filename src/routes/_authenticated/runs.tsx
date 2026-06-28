@@ -191,7 +191,8 @@ function RunsPage() {
               </Button>
             </div>
             <div>
-
+              <div className="mb-2 text-sm text-muted-foreground">
+                Step 1 — Ingest from PCC (per facility; rate-limit aware)
               </div>
               <div className="flex flex-wrap gap-2">
                 {FACILITIES.map((f) => {
