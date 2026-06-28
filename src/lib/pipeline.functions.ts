@@ -396,20 +396,22 @@ export const runExtraction = createServerFn({ method: "POST" })
 
 function hasActivePartB(coveragePayload: any): boolean {
   if (!coveragePayload) return false;
-  const flat = JSON.stringify(coveragePayload).toLowerCase();
-  if (!flat.includes("part b") && !flat.includes("partb") && !flat.includes("medicare b")) {
-    // try common keys
-    const plan = coveragePayload.plan ?? coveragePayload.coverage ?? coveragePayload.type;
-    if (typeof plan === "string" && /part\s*b|medicare/i.test(plan)) {
-      // continue to status check
-    } else {
-      return false;
-    }
-  }
-  const status = coveragePayload.status ?? coveragePayload.active ?? coveragePayload.state;
-  if (typeof status === "boolean") return status;
-  if (typeof status === "string") return /active|true|yes/i.test(status);
-  return /active|true/i.test(flat);
+  // PCC returns an array of coverage rows; treat object as single-row too.
+  const rows: any[] = Array.isArray(coveragePayload) ? coveragePayload : [coveragePayload];
+  const now = Date.now();
+  return rows.some((r) => {
+    const isPartB =
+      r.payer_code === "MCB" ||
+      /part\s*b|medicare\s*b/i.test(String(r.payer_name ?? r.plan ?? r.coverage ?? r.type ?? ""));
+    if (!isPartB) return false;
+    const to = r.effective_to ? Date.parse(r.effective_to) : NaN;
+    const from = r.effective_from ? Date.parse(r.effective_from) : 0;
+    const activeWindow = (!Number.isFinite(to) || to >= now) && (!Number.isFinite(from) || from <= now);
+    const status = r.status ?? r.active;
+    if (typeof status === "boolean") return status && activeWindow;
+    if (typeof status === "string") return /active|true|yes/i.test(status) && activeWindow;
+    return activeWindow;
+  });
 }
 
 export const runRules = createServerFn({ method: "POST" })
