@@ -314,14 +314,157 @@ function RunsPage() {
                 {extract.isPending ? "Extracting…" : "Run extraction"}
               </Button>
             </div>
-            <div>
-              <div className="mb-2 text-sm text-muted-foreground">
+            <div className="space-y-2">
+              <div className="text-sm text-muted-foreground">
                 Step 3 — Apply deterministic eligibility rules
               </div>
-              <Button onClick={() => decide.mutate()} disabled={decide.isPending}>
-                {decide.isPending ? "Deciding…" : "Run rules engine"}
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="secondary"
+                  onClick={() => { setShowPreview(true); preview.refetch(); }}
+                  disabled={preview.isFetching}
+                >
+                  {preview.isFetching ? "Computing preview…" : "Preview decisions"}
+                </Button>
+                <Button onClick={() => decide.mutate(undefined)} disabled={decide.isPending}>
+                  {decide.isPending ? "Deciding…" : "Commit all decisions"}
+                </Button>
+              </div>
             </div>
+
+            {showPreview && (
+              <div className="rounded-md border p-3 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-sm font-medium">Preview — no rows committed yet</div>
+                  {preview.data && (
+                    <div className="flex gap-2 text-xs">
+                      <Badge variant="default">auto_accept: {preview.data.counts.auto_accept}</Badge>
+                      <Badge variant="secondary">flag: {preview.data.counts.flag_for_review}</Badge>
+                      <Badge variant="destructive">reject: {preview.data.counts.reject}</Badge>
+                      <span className="text-muted-foreground">total: {preview.data.counts.total}</span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {(["auto_accept", "flag_for_review", "reject", "all"] as const).map((d) => (
+                    <Button
+                      key={d}
+                      size="sm"
+                      variant={decisionFilter === d ? "default" : "outline"}
+                      onClick={() => { setDecisionFilter(d); setSelected({}); }}
+                    >
+                      {d}
+                    </Button>
+                  ))}
+                  <div className="ml-auto flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">{selectedIds.length} selected</span>
+                    <Button
+                      size="sm"
+                      disabled={selectedIds.length === 0 || decide.isPending}
+                      onClick={() => decide.mutate(selectedIds)}
+                    >
+                      Commit selected ({selectedIds.length})
+                    </Button>
+                  </div>
+                </div>
+                <div className="max-h-[480px] overflow-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-8">
+                          <Checkbox checked={allChecked} onCheckedChange={toggleAll} />
+                        </TableHead>
+                        <TableHead>Patient</TableHead>
+                        <TableHead>Facility</TableHead>
+                        <TableHead>Decision</TableHead>
+                        <TableHead>Primary wound</TableHead>
+                        <TableHead>Measurements</TableHead>
+                        <TableHead>Reason / matches</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredRows.slice(0, 500).map((r) => {
+                        const p = r.primary;
+                        const meas = p
+                          ? [p.length_cm, p.width_cm, p.depth_cm]
+                              .map((v) => (v == null ? "—" : `${v}`))
+                              .join(" × ") + " cm"
+                          : "—";
+                        return (
+                          <TableRow key={r.patient_id}>
+                            <TableCell>
+                              <Checkbox
+                                checked={!!selected[r.patient_id]}
+                                onCheckedChange={(v) =>
+                                  setSelected((s) => ({ ...s, [r.patient_id]: !!v }))
+                                }
+                              />
+                            </TableCell>
+                            <TableCell className="text-xs">
+                              <div className="font-medium">{r.patient_name ?? r.patient_id}</div>
+                              <div className="text-muted-foreground">{r.patient_id}</div>
+                              {r.has_partb ? null : (
+                                <Badge variant="destructive" className="mt-1">no Part B</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-xs">{r.facility}</TableCell>
+                            <TableCell>
+                              <Badge
+                                variant={
+                                  r.decision === "auto_accept"
+                                    ? "default"
+                                    : r.decision === "flag_for_review"
+                                    ? "secondary"
+                                    : "destructive"
+                                }
+                              >
+                                {r.decision}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-xs">
+                              {p ? (
+                                <>
+                                  <div>{p.wound_type?.replace(/_/g, " ") ?? "—"}</div>
+                                  <div className="text-muted-foreground">
+                                    {p.location ?? "—"}
+                                    {p.wound_stage ? ` · stage ${p.wound_stage}` : ""}
+                                    {p.confidence ? ` · conf ${p.confidence}` : ""}
+                                  </div>
+                                </>
+                              ) : (
+                                "—"
+                              )}
+                            </TableCell>
+                            <TableCell className="text-xs">
+                              {meas}
+                              {p?.drainage ? <div className="text-muted-foreground">drainage: {p.drainage}</div> : null}
+                            </TableCell>
+                            <TableCell className="text-xs max-w-[360px]">
+                              {r.routing_reason}
+                              {r.missing_fields.length > 0 && (
+                                <div className="text-muted-foreground">missing: {r.missing_fields.join(", ")}</div>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                      {filteredRows.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center text-sm text-muted-foreground">
+                            No rows for this filter.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                  {filteredRows.length > 500 && (
+                    <div className="p-2 text-xs text-muted-foreground">
+                      Showing first 500 of {filteredRows.length}.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
