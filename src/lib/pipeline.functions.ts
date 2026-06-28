@@ -577,3 +577,72 @@ export const getRuns = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     return data ?? [];
   });
+
+// ---------- 5. BACKFILL ----------
+// Re-fetch sub-resources for any patient missing data, and drain ingest_failures.
+// Caller (UI) invokes this repeatedly until counters report no more missing.
+export const runBackfill = createServerFn({ method: "POST" })
+  .handler(async () => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const base = process.env.PCC_API_BASE_URL || PCC_BASE_DEFAULT;
+    const key = process.env.PCC_API_KEY;
+    const headers: Record<string, string> = { accept: "application/json" };
+    if (key) headers["Authorization"] = `Bearer ${key}`;
+
+    const counters = { http_429s: 0 };
+
+    // Build set of patient_ids that are missing any of the 4 sub-resources.
+    const { data: patients = [] } = await supabaseAdmin
+      .from("raw_patients")
+      .select("patient_id, payload");
+
+    const [{ data: dx = [] }, { data: cov = [] }, { data: notes = [] }, { data: asmts = [] }] =
+      await Promise.all([
+        supabaseAdmin.from("raw_diagnoses").select("patient_id"),
+        supabaseAdmin.from("raw_coverage").select("patient_id"),
+        supabaseAdmin.from("raw_notes").select("patient_id"),
+        supabaseAdmin.from("raw_assessments").select("patient_id"),
+      ]);
+
+    const hasDx = new Set((dx ?? []).map((r: any) => r.patient_id));
+    const hasCov = new Set((cov ?? []).map((r: any) => r.patient_id));
+    const hasNotes = new Set((notes ?? []).map((r: any) => r.patient_id));
+    const hasAsmts = new Set((asmts ?? []).map((r: any) => r.patient_id));
+
+    // Also include patients referenced by recent ingest_failures.
+    const { data: fails = [] } = await supabaseAdmin
+      .from("ingest_failures")
+      .select("patient_id")
+      .limit(2000);
+    const failingPids = new Set((fails ?? []).map((f: any) => f.patient_id).filter(Boolean));
+
+    const candidates = (patients ?? []).filter((p: any) => {
+      const pid = p.patient_id;
+      return failingPids.has(pid) ||
+        !hasDx.has(pid) || !hasCov.has(pid) ||
+        !hasNotes.has(pid) || !hasAsmts.has(pid);
+    });
+
+    // Cap per call so we stay within worker time budget; UI loops until 0.
+    const batch = candidates.slice(0, 25);
+
+    let attempted = 0;
+    await pLimit(batch, 4, async (p: any) => {
+      const pidStr = p.patient_id;
+      const pidNum = (p.payload as any)?.id;
+      if (pidNum == null) return;
+      await ingestOnePatient(supabaseAdmin, base, headers, counters, pidStr, pidNum);
+      attempted++;
+    });
+
+    // Report what's still missing across the whole table after this pass.
+    const remaining = candidates.length - batch.length;
+
+    return {
+      ok: true,
+      attempted,
+      remaining_candidates: remaining,
+      http_429s: counters.http_429s,
+    };
+  });
+
