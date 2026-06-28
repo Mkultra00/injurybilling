@@ -320,7 +320,7 @@ export const runExtraction = createServerFn({ method: "POST" })
   .handler(async () => {
     
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { generateObject } = await import("ai");
+    const { generateText } = await import("ai");
     const { createLovableAiGatewayProvider } = await import("@/lib/ai-gateway.server");
 
     const key = process.env.LOVABLE_API_KEY;
