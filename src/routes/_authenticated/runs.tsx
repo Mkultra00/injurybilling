@@ -114,7 +114,7 @@ function RunsPage() {
     }
   }
 
-  async function runBackfillLoop() {
+  async function runBackfillLoop(onProgress?: (msg: string) => void) {
     setBackfillState({ running: true, passes: 0, remaining: 0, attempted: 0 });
     let totalAttempted = 0;
     for (let pass = 1; pass <= 50; pass++) {
