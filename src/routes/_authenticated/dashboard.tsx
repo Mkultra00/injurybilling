@@ -61,13 +61,6 @@ function Dashboard() {
     reject: rows.filter((r) => r.decision === "reject").length,
   };
 
-  const signOut = async () => {
-    await qc.cancelQueries();
-    qc.clear();
-    await supabase.auth.signOut();
-    navigate({ to: "/auth", replace: true });
-  };
-
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b">
@@ -81,7 +74,6 @@ function Dashboard() {
               Pipeline runs
             </Link>
           </div>
-          <Button variant="ghost" size="sm" onClick={signOut}>Sign out</Button>
         </div>
       </header>
 
