@@ -216,13 +216,37 @@ function RunsPage() {
             <CardTitle className="text-base">Run the pipeline</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
-              <div className="mb-2 text-sm font-medium">
-                Run everything — ingest → backfill → extract → rules
+            <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-medium">
+                  Run everything — ingest → backfill → extract → rules
+                </div>
+                <Button onClick={runAll} disabled={allRunning} size="lg">
+                  {allRunning ? "Running…" : "Run full pipeline"}
+                </Button>
               </div>
-              <Button onClick={runAll} disabled={allState.running} size="lg">
-                {allState.running ? allState.step || "Running…" : "Run full pipeline"}
-              </Button>
+              <ol className="space-y-1.5">
+                {steps.map((s, i) => {
+                  const icon =
+                    s.status === "done" ? "✓" :
+                    s.status === "running" ? "●" :
+                    s.status === "error" ? "✕" : "○";
+                  const color =
+                    s.status === "done" ? "text-green-600" :
+                    s.status === "running" ? "text-primary animate-pulse" :
+                    s.status === "error" ? "text-destructive" : "text-muted-foreground";
+                  return (
+                    <li key={s.key} className="flex items-start gap-2 text-sm">
+                      <span className={`w-5 text-center font-mono ${color}`}>{icon}</span>
+                      <span className="text-xs text-muted-foreground w-6">{i + 1}.</span>
+                      <span className={s.status === "pending" ? "text-muted-foreground" : ""}>{s.label}</span>
+                      {s.detail && (
+                        <span className="text-xs text-muted-foreground">— {s.detail}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
             </div>
             <div>
               <div className="mb-2 text-sm text-muted-foreground">
