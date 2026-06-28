@@ -108,6 +108,80 @@ async function tryEndpoint(
   }
 }
 
+// Fetch all sub-resources for a single patient. Each endpoint is independent —
+// one failure logs to ingest_failures but does NOT abort the others.
+async function ingestOnePatient(
+  supabaseAdmin: any,
+  base: string,
+  headers: Record<string, string>,
+  counters: { http_429s: number },
+  pidStr: string,
+  pidNum: number,
+) {
+  // diagnoses
+  const dx = await tryEndpoint(
+    supabaseAdmin, pidStr, "diagnoses",
+    `${base}/pcc/diagnoses?patient_id=${encodeURIComponent(pidStr)}`, headers, counters,
+  );
+  if (Array.isArray(dx) && dx.length) {
+    await supabaseAdmin.from("raw_diagnoses").upsert(
+      dx.map((d: any) => ({
+        id: String(d.id ?? `${pidStr}-${d.icd10_code ?? d.code ?? Math.random()}`),
+        patient_id: pidStr,
+        payload: d,
+      })),
+      { onConflict: "id" },
+    );
+  }
+
+  // coverage
+  const cov = await tryEndpoint(
+    supabaseAdmin, pidStr, "coverage",
+    `${base}/pcc/coverage?patient_id=${encodeURIComponent(pidStr)}`, headers, counters,
+  );
+  if (cov != null) {
+    await supabaseAdmin.from("raw_coverage").upsert(
+      { patient_id: pidStr, payload: cov, fetched_at: new Date().toISOString() },
+      { onConflict: "patient_id" },
+    );
+  }
+
+  // notes
+  const notes = await tryEndpoint(
+    supabaseAdmin, pidStr, "notes",
+    `${base}/pcc/notes?patient_id=${pidNum}`, headers, counters,
+  );
+  if (Array.isArray(notes) && notes.length) {
+    await supabaseAdmin.from("raw_notes").upsert(
+      notes.map((n: any) => ({
+        id: String(n.pcc_note_id ?? n.id ?? `${pidStr}-n-${Math.random()}`),
+        patient_id: pidStr,
+        format: n.note_type ?? null,
+        body: n.note_text ?? null,
+        payload: n,
+      })),
+      { onConflict: "id" },
+    );
+  }
+
+  // assessments
+  const asmts = await tryEndpoint(
+    supabaseAdmin, pidStr, "assessments",
+    `${base}/pcc/assessments?patient_id=${pidNum}`, headers, counters,
+  );
+  if (Array.isArray(asmts) && asmts.length) {
+    await supabaseAdmin.from("raw_assessments").upsert(
+      asmts.map((a: any) => ({
+        id: String(a.pcc_assessment_id ?? a.id ?? `${pidStr}-a-${Math.random()}`),
+        patient_id: pidStr,
+        payload: a,
+      })),
+      { onConflict: "id" },
+    );
+  }
+}
+
+
 
 // ---------- 1. INGESTION ----------
 
