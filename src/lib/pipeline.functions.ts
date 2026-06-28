@@ -21,52 +21,52 @@ function regexExtractWounds(text: string): { wounds: any[]; extraction_notes: st
   if (!text) return { wounds: [], extraction_notes: "empty source" };
   const t = text.toLowerCase();
 
+  // Labels MUST match rules.ts BILLABLE_TYPES
   const typeMap: Array<[RegExp, string]> = [
     [/\b(pressure\s*(ulcer|injury|sore)|decubitus|bed\s*sore)\b/, "pressure_ulcer"],
-    [/\b(diabetic\s*(foot\s*)?ulcer|dfu|neuropathic\s*ulcer)\b/, "diabetic_ulcer"],
-    [/\b(venous\s*(stasis\s*)?ulcer|vlu)\b/, "venous_ulcer"],
-    [/\b(arterial\s*ulcer|ischemic\s*ulcer)\b/, "arterial_ulcer"],
-    [/\b(surgical\s*(wound|incision)|post[-\s]?op(erative)?\s*wound|dehiscence)\b/, "surgical_wound"],
-    [/\b(traumatic\s*wound|laceration|abrasion|puncture\s*wound)\b/, "traumatic_wound"],
+    [/\b(diabetic(\s*foot)?\s*ulcer|dfu|neuropathic\s*ulcer)\b|\bdiabetic\s+to\b/, "diabetic_foot_ulcer"],
+    [/\b(venous\s*(stasis\s*)?ulcer|vlu)\b|\bvenous\s+to\b/, "venous_ulcer"],
+    [/\b(arterial\s*ulcer|ischemic\s*ulcer)\b|\barterial\s+to\b/, "arterial_ulcer"],
+    [/\b(surgical(\s*site)?\s*(wound|incision|infection)|post[-\s]?op(erative)?\s*wound|dehiscence|ssi)\b|\bsurgical\s+to\b/, "surgical_site_infection"],
+    [/\b(abscess)\b/, "abscess"],
     [/\b(burn|thermal\s*injury|scald)\b/, "burn"],
-    [/\b(skin\s*tear)\b/, "skin_tear"],
   ];
   let wound_type: string | null = null;
   for (const [re, label] of typeMap) {
     if (re.test(t)) { wound_type = label; break; }
   }
-  if (!wound_type && /\b(wound|ulcer|lesion)\b/.test(t)) wound_type = "other";
-  if (!wound_type) return { wounds: [], extraction_notes: "regex: no wound mentioned" };
+  if (!wound_type) return { wounds: [], extraction_notes: "regex: no billable wound type" };
 
-  const stageMatch = t.match(/\bstage\s*(1|2|3|4|i{1,3}v?|iv)\b/);
+  // Stage values MUST match rules.ts STAGE_RANK keys ("2","3","4","unstageable")
+  const stageMatch = t.match(/\bstage\s*[:\s]*(1|2|3|4|i{1,3}v?|iv)\b/);
   const stageMap: Record<string, string> = {
-    "1": "stage_1", i: "stage_1",
-    "2": "stage_2", ii: "stage_2",
-    "3": "stage_3", iii: "stage_3",
-    "4": "stage_4", iv: "stage_4",
+    "1": "1", i: "1",
+    "2": "2", ii: "2",
+    "3": "3", iii: "3",
+    "4": "4", iv: "4",
   };
   let wound_stage: string | null = stageMatch ? stageMap[stageMatch[1]] ?? null : null;
   if (!wound_stage && /\bunstageable\b/.test(t)) wound_stage = "unstageable";
-  if (!wound_stage && /\bdeep\s*tissue\s*injury|dti\b/.test(t)) wound_stage = "deep_tissue_injury";
 
+  // Dimensions: "4.9 cm x 1.6 cm" or "4.9x1.6x1.1cm"
   const dim = t.match(/(\d+(?:\.\d+)?)\s*(?:cm)?\s*[x×]\s*(\d+(?:\.\d+)?)\s*(?:cm)?(?:\s*[x×]\s*(\d+(?:\.\d+)?))?\s*cm?/);
   const length_cm = dim ? parseFloat(dim[1]) : null;
   const width_cm = dim ? parseFloat(dim[2]) : null;
   const depth_cm = dim && dim[3] ? parseFloat(dim[3]) : null;
 
-  const drainageMatch = t.match(/\b(no|none|scant|small|minimal|moderate|large|copious|heavy)\b[^.]{0,30}\b(drainage|exudate|discharge)\b/);
+  // Drainage: types.ts Drainage = none|light|moderate|heavy
   let drainage: string | null = null;
-  if (drainageMatch) {
-    const d = drainageMatch[1];
-    drainage = d === "no" || d === "none" ? "none"
-      : d === "scant" || d === "minimal" || d === "small" ? "scant"
-      : d === "moderate" ? "moderate"
-      : "large";
-  }
+  if (/\b(no|none|absent)\b[^.]{0,30}\b(drainage|exudate|discharge)\b/.test(t)) drainage = "none";
+  else if (/\b(scant|small|minimal|light|mild|low)\b[^.]{0,30}(drainage|exudate|discharge|serosang|serous|sang)\w*/.test(t)) drainage = "light";
+  else if (/\b(moderate|mod)\b[^.]{0,30}(drainage|exudate|discharge|serosang|serous|sang)\w*/.test(t)) drainage = "moderate";
+  else if (/\b(large|copious|heavy|profuse|excessive)\b[^.]{0,30}(drainage|exudate|discharge|serosang|serous|sang)\w*/.test(t)) drainage = "heavy";
+  else if (/\bdrainage\s+present\b/.test(t)) drainage = "moderate";
 
-  const locMatch = t.match(/\b(?:on|at|over|to)\s+(?:the\s+)?(left|right|bilateral)?\s*(sacrum|sacral|heel|coccyx|ischium|trochanter|hip|ankle|foot|toe|leg|calf|knee|elbow|shoulder|back|buttock|abdomen|chest|arm|hand|finger)/);
-  const location = locMatch ? `${locMatch[1] ?? ""} ${locMatch[2]}`.trim() : null;
+  // Location: after to/on/at/over (handles "Surgical to Abdominal wall")
+  const locMatch = t.match(/\b(?:to|on|at|over)\s+(?:the\s+)?((?:left|right|bilateral)?\s*(?:sacrum|sacral|heel|coccyx|ischium|trochanter|hip|ankle|foot|toe|leg|calf|knee|elbow|shoulder|back|buttock|abdominal\s*wall|abdomen|chest|arm|hand|finger))/);
+  const location = locMatch ? locMatch[1].trim().replace(/\s+/g, " ") : null;
 
+  const complete = !!(length_cm && width_cm && drainage);
   return {
     wounds: [{
       wound_type,
@@ -77,10 +77,10 @@ function regexExtractWounds(text: string): { wounds: any[]; extraction_notes: st
       depth_cm,
       drainage,
       is_primary_wound: true,
-      confidence: "low",
-      source_quote: null,
+      confidence: complete ? (depth_cm ? "high" : "medium") : "low",
+      source_quote: text.slice(0, 240),
     }],
-    extraction_notes: "regex fallback",
+    extraction_notes: "regex extractor",
   };
 }
 
