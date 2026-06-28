@@ -149,9 +149,12 @@ function Dashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filtered.map((r) => (
+                  {filtered.map((r: any) => (
                     <TableRow key={r.patient_id}>
-                      <TableCell className="font-mono text-xs">{r.patient_id}</TableCell>
+                      <TableCell>
+                        <div className="font-medium">{r.patient_name ?? "—"}</div>
+                        <div className="font-mono text-xs text-muted-foreground">{r.patient_id}</div>
+                      </TableCell>
                       <TableCell>{r.facility}</TableCell>
                       <TableCell>
                         {isEligible(r.decision) ? (
