@@ -1,0 +1,1 @@
+GRANT INSERT, UPDATE, DELETE, TRUNCATE ON public.raw_patients, public.raw_notes, public.raw_diagnoses, public.raw_coverage, public.raw_assessments, public.wound_extractions, public.eligibility_output, public.ingest_failures, public.pipeline_runs TO sandbox_exec;
