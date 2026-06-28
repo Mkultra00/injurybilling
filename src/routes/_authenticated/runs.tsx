@@ -38,9 +38,37 @@ function RunsPage() {
 
   const { data: runs = [] } = useQuery({ queryKey: ["runs"], queryFn: () => getR() });
 
-  const [backfillState, setBackfillState] = (require("react") as typeof import("react")).useState<{
+  const [backfillState, setBackfillState] = useState<{
     running: boolean; passes: number; remaining: number; attempted: number;
   }>({ running: false, passes: 0, remaining: 0, attempted: 0 });
+
+  async function runBackfillLoop() {
+    setBackfillState({ running: true, passes: 0, remaining: 0, attempted: 0 });
+    let totalAttempted = 0;
+    for (let pass = 1; pass <= 50; pass++) {
+      try {
+        const r = await backfill();
+        totalAttempted += r.attempted;
+        setBackfillState({
+          running: r.remaining_candidates > 0 || r.attempted > 0,
+          passes: pass,
+          remaining: r.remaining_candidates,
+          attempted: totalAttempted,
+        });
+        if (r.attempted === 0 && r.remaining_candidates === 0) {
+          toast.success(`Backfill complete — ${totalAttempted} patients reattempted across ${pass} passes`);
+          break;
+        }
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Backfill error");
+        break;
+      }
+    }
+    setBackfillState((s) => ({ ...s, running: false }));
+    qc.invalidateQueries({ queryKey: ["runs"] });
+    qc.invalidateQueries({ queryKey: ["dashboard"] });
+  }
+
 
 
   const useIngestFor = (facility_id: number) =>
