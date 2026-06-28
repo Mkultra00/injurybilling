@@ -49,27 +49,60 @@ function RunsPage() {
     running: boolean; passes: number; remaining: number; attempted: number;
   }>({ running: false, passes: 0, remaining: 0, attempted: 0 });
 
-  const [allState, setAllState] = useState<{ running: boolean; step: string }>({
-    running: false,
-    step: "",
-  });
+  type StepStatus = "pending" | "running" | "done" | "error";
+  type StepKey = "ingest_101" | "ingest_102" | "ingest_103" | "backfill" | "extract" | "rules";
+  const initialSteps: { key: StepKey; label: string; status: StepStatus; detail?: string }[] = [
+    { key: "ingest_101", label: "Ingest Facility A (101)", status: "pending" },
+    { key: "ingest_102", label: "Ingest Facility B (102)", status: "pending" },
+    { key: "ingest_103", label: "Ingest Facility C (103)", status: "pending" },
+    { key: "backfill", label: "Backfill missing", status: "pending" },
+    { key: "extract", label: "Extract wounds", status: "pending" },
+    { key: "rules", label: "Apply rules", status: "pending" },
+  ];
+  const [allRunning, setAllRunning] = useState(false);
+  const [steps, setSteps] = useState(initialSteps);
+  const updateStep = (key: StepKey, status: StepStatus, detail?: string) =>
+    setSteps((prev) => prev.map((s) => (s.key === key ? { ...s, status, detail } : s)));
 
   async function runAll() {
-    setAllState({ running: true, step: "Starting…" });
+    setSteps(initialSteps);
+    setAllRunning(true);
     try {
       for (const f of FACILITIES) {
-        setAllState({ running: true, step: `Ingesting ${f.label}…` });
-        const r = await ing({ data: { facility_id: f.id } });
-        toast.success(`Ingested ${f.label}: ${r.processed} patients`);
+        const key = `ingest_${f.id}` as StepKey;
+        updateStep(key, "running");
+        try {
+          const r = await ing({ data: { facility_id: f.id } });
+          updateStep(key, "done", `${r.processed} patients, ${r.http_429s} 429s`);
+        } catch (e) {
+          updateStep(key, "error", e instanceof Error ? e.message : "failed");
+          throw e;
+        }
       }
-      setAllState({ running: true, step: "Backfilling missing…" });
-      await runBackfillLoop();
-      setAllState({ running: true, step: "Extracting wounds…" });
-      const ex = await ext();
-      toast.success(`Extraction: ${ex.extracted} done, ${ex.failures} failed`);
-      setAllState({ running: true, step: "Applying rules…" });
-      const dr = await rules();
-      toast.success(`Decisions written for ${dr.written} patients`);
+      updateStep("backfill", "running");
+      try {
+        await runBackfillLoop((p) => updateStep("backfill", "running", p));
+        updateStep("backfill", "done");
+      } catch (e) {
+        updateStep("backfill", "error", e instanceof Error ? e.message : "failed");
+        throw e;
+      }
+      updateStep("extract", "running");
+      try {
+        const ex = await ext();
+        updateStep("extract", "done", `${ex.extracted} done / ${ex.failures} failed`);
+      } catch (e) {
+        updateStep("extract", "error", e instanceof Error ? e.message : "failed");
+        throw e;
+      }
+      updateStep("rules", "running");
+      try {
+        const dr = await rules();
+        updateStep("rules", "done", `${dr.written} decisions`);
+      } catch (e) {
+        updateStep("rules", "error", e instanceof Error ? e.message : "failed");
+        throw e;
+      }
       qc.invalidateQueries({ queryKey: ["runs"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
       qc.invalidateQueries({ queryKey: ["table-counts"] });
@@ -77,11 +110,11 @@ function RunsPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Pipeline failed");
     } finally {
-      setAllState({ running: false, step: "" });
+      setAllRunning(false);
     }
   }
 
-  async function runBackfillLoop() {
+  async function runBackfillLoop(onProgress?: (msg: string) => void) {
     setBackfillState({ running: true, passes: 0, remaining: 0, attempted: 0 });
     let totalAttempted = 0;
     for (let pass = 1; pass <= 50; pass++) {
@@ -94,6 +127,7 @@ function RunsPage() {
           remaining: r.remaining_candidates,
           attempted: totalAttempted,
         });
+        onProgress?.(`pass ${pass}, ${r.remaining_candidates} remaining`);
         if (r.attempted === 0 && r.remaining_candidates === 0) {
           toast.success(`Backfill complete — ${totalAttempted} patients reattempted across ${pass} passes`);
           break;
@@ -182,13 +216,37 @@ function RunsPage() {
             <CardTitle className="text-base">Run the pipeline</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
-              <div className="mb-2 text-sm font-medium">
-                Run everything — ingest → backfill → extract → rules
+            <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-medium">
+                  Run everything — ingest → backfill → extract → rules
+                </div>
+                <Button onClick={runAll} disabled={allRunning} size="lg">
+                  {allRunning ? "Running…" : "Run full pipeline"}
+                </Button>
               </div>
-              <Button onClick={runAll} disabled={allState.running} size="lg">
-                {allState.running ? allState.step || "Running…" : "Run full pipeline"}
-              </Button>
+              <ol className="space-y-1.5">
+                {steps.map((s, i) => {
+                  const icon =
+                    s.status === "done" ? "✓" :
+                    s.status === "running" ? "●" :
+                    s.status === "error" ? "✕" : "○";
+                  const color =
+                    s.status === "done" ? "text-green-600" :
+                    s.status === "running" ? "text-primary animate-pulse" :
+                    s.status === "error" ? "text-destructive" : "text-muted-foreground";
+                  return (
+                    <li key={s.key} className="flex items-start gap-2 text-sm">
+                      <span className={`w-5 text-center font-mono ${color}`}>{icon}</span>
+                      <span className="text-xs text-muted-foreground w-6">{i + 1}.</span>
+                      <span className={s.status === "pending" ? "text-muted-foreground" : ""}>{s.label}</span>
+                      {s.detail && (
+                        <span className="text-xs text-muted-foreground">— {s.detail}</span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
             </div>
             <div>
               <div className="mb-2 text-sm text-muted-foreground">
@@ -213,7 +271,7 @@ function RunsPage() {
               <div className="mb-2 text-sm text-muted-foreground">
                 Step 1b — Backfill missing data (20-retry, drains failure queue, loops until done)
               </div>
-              <Button onClick={runBackfillLoop} disabled={backfillState.running} variant="secondary">
+              <Button onClick={() => runBackfillLoop()} disabled={backfillState.running} variant="secondary">
                 {backfillState.running
                   ? `Backfilling… pass ${backfillState.passes}, ${backfillState.remaining} remaining`
                   : "Backfill missing"}
