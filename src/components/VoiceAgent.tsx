@@ -8,6 +8,7 @@ import { Mic, MicOff, X } from "lucide-react";
 import { toast } from "sonner";
 
 const STORAGE_KEY = "wellator_elevenlabs_agent_id";
+const DEFAULT_AGENT_ID = "agent_0701kw2dyj7fe5kanmp80fq5ncwb";
 
 export function VoiceAgent() {
   return (
@@ -21,7 +22,7 @@ function VoiceAgentInner() {
 
   const [open, setOpen] = useState(false);
   const [agentId, setAgentId] = useState<string>(
-    () => (typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY)) || "",
+    () => (typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY)) || DEFAULT_AGENT_ID,
   );
   const [transcript, setTranscript] = useState<
     Array<{ role: "user" | "agent"; text: string }>
