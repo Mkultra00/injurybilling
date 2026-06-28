@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { useConversation } from "@elevenlabs/react";
+import { ConversationProvider, useConversation } from "@elevenlabs/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -9,11 +9,16 @@ import { toast } from "sonner";
 
 const STORAGE_KEY = "wellator_elevenlabs_agent_id";
 
-// Floating healthcare voice agent. The agent is configured in the ElevenLabs
-// dashboard with a webhook tool pointing at /api/public/voice-agent; this
-// component just opens the WebRTC session and renders live transcripts so the
-// user can hear (and see) the agent explain dashboard rows.
 export function VoiceAgent() {
+  return (
+    <ConversationProvider>
+      <VoiceAgentInner />
+    </ConversationProvider>
+  );
+}
+
+function VoiceAgentInner() {
+
   const [open, setOpen] = useState(false);
   const [agentId, setAgentId] = useState<string>(
     () => (typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY)) || "",
