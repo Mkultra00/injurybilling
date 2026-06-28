@@ -131,12 +131,29 @@ function RunsPage() {
       <main className="mx-auto max-w-7xl space-y-6 p-6">
         <Card>
           <CardHeader>
+            <CardTitle className="text-base">Table row counts</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
+              {counts.map((c) => (
+                <div key={c.table} className="rounded-md border p-3">
+                  <div className="truncate text-xs font-medium text-muted-foreground">{c.table}</div>
+                  <div className="mt-1 text-2xl font-semibold tabular-nums">{c.count}</div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
             <CardTitle className="text-base">Run the pipeline</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
               <div className="mb-2 text-sm text-muted-foreground">
                 Step 1 — Ingest from PCC (per facility; rate-limit aware)
+
               </div>
               <div className="flex flex-wrap gap-2">
                 {FACILITIES.map((f) => {
