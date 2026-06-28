@@ -503,6 +503,7 @@ function RunsPage() {
           </CardContent>
         </Card>
       </main>
+      <VoiceAgent />
     </div>
   );
 }
