@@ -108,9 +108,9 @@ export const runIngestion = createServerFn({ method: "POST" })
         patients.map((p) => ({
           patient_id: String(p.id),
           facility,
-          payload: p,
+          payload: p as any,
           fetched_at: new Date().toISOString(),
-        })),
+        })) as any,
         { onConflict: "patient_id" },
       );
 
@@ -299,13 +299,16 @@ export const runExtraction = createServerFn({ method: "POST" })
 
     await pLimit(items, 4, async (item) => {
       try {
-        const { experimental_output } = await generateText({
+        const result = await generateText({
           model,
           system: EXTRACTION_SYSTEM_PROMPT,
           prompt: item.text,
-          experimental_output: Output.object({ schema: ExtractionSchema }),
-        });
-        const parsed = experimental_output;
+          experimental_output: Output.object({ schema: ExtractionSchema as any }),
+        } as any);
+        const parsed = (result as any).experimental_output as
+          | { wounds: any[]; extraction_notes: string | null }
+          | undefined;
+        if (!parsed) throw new Error("no structured output");
         if (!parsed.wounds.length) {
           await supabaseAdmin.from("wound_extractions").insert({
             source_table: item.source_table,
@@ -450,14 +453,7 @@ export const runFullPipeline = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await ensureAdmin(context);
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    // Note: caller should call runIngestion per-facility for visible progress.
-    // This orchestrator does extraction + rules only.
-    const summary: Record<string, unknown> = {};
-    // dynamic import to reuse handlers' code is awkward across server fns; replicate steps inline
-    // For simplicity expose a single button that calls each step in sequence on the client.
-    summary.note = "Use the buttons on /runs to step the pipeline.";
-    return summary;
+    return { ok: true as const, note: "Run each step from /runs." };
   });
 
 // ---------- Dashboard reads ----------
