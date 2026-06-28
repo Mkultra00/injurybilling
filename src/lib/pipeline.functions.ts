@@ -51,14 +51,15 @@ async function fetchWithRetry(
         continue;
       }
       if (!resp.ok && resp.status >= 500) {
-        await new Promise((r) => setTimeout(r, Math.min(500 * (attempt + 1), 10000)));
+        await new Promise((r) => setTimeout(r, 20000));
         continue;
       }
       return resp;
     } catch (e) {
       lastErr = e;
-      await new Promise((r) => setTimeout(r, Math.min(500 * (attempt + 1), 10000)));
+      await new Promise((r) => setTimeout(r, 20000));
     }
+
   }
   const err: any = new Error(
     `Exhausted ${maxAttempts} retries for ${url}: ${String(lastErr ?? lastStatus ?? "unknown")}`,
