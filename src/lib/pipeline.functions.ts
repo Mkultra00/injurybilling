@@ -1,6 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { ExtractionSchema, EXTRACTION_SYSTEM_PROMPT } from "@/lib/wellator/extraction-schema";
 import { decideEligibility, pickPrimary } from "@/lib/wellator/rules";
 import type { ExtractionRow } from "@/lib/wellator/types";
@@ -74,7 +73,6 @@ async function pLimit<T>(items: T[], limit: number, worker: (item: T) => Promise
 // ---------- 1. INGESTION ----------
 
 export const runIngestion = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
     z.object({ facility_id: z.union(FACILITY_IDS.map((id) => z.literal(id)) as any) }).parse(input),
   )
@@ -269,7 +267,6 @@ function noteAsText(row: { body?: string | null; payload: any; format?: string |
 }
 
 export const runExtraction = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await ensureAdmin(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -415,7 +412,6 @@ function hasActivePartB(coveragePayload: any): boolean {
 }
 
 export const runRules = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await ensureAdmin(context);
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -478,7 +474,6 @@ export const runRules = createServerFn({ method: "POST" })
 // ---------- 4. ORCHESTRATOR ----------
 
 export const runFullPipeline = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     await ensureAdmin(context);
     return { ok: true as const, note: "Run each step from /runs." };
@@ -487,7 +482,6 @@ export const runFullPipeline = createServerFn({ method: "POST" })
 // ---------- Dashboard reads ----------
 
 export const getDashboard = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("eligibility_output")
@@ -499,7 +493,6 @@ export const getDashboard = createServerFn({ method: "GET" })
   });
 
 export const getPatientDetail = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
     z.object({ patient_id: z.string() }).parse(input),
   )
@@ -520,7 +513,6 @@ export const getPatientDetail = createServerFn({ method: "POST" })
   });
 
 export const getRuns = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("pipeline_runs")
