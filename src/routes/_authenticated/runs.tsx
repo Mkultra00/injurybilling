@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import brandAvatar from "@/assets/golden-dawn-avatar.webp.asset.json";
 import { toast } from "sonner";
+import { VoiceAgent } from "@/components/VoiceAgent";
 import {
   Table,
   TableBody,
