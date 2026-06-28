@@ -148,6 +148,21 @@ function RunsPage() {
             </div>
             <div>
               <div className="mb-2 text-sm text-muted-foreground">
+                Step 1b — Backfill missing data (20-retry, drains failure queue, loops until done)
+              </div>
+              <Button onClick={runBackfillLoop} disabled={backfillState.running} variant="secondary">
+                {backfillState.running
+                  ? `Backfilling… pass ${backfillState.passes}, ${backfillState.remaining} remaining`
+                  : "Backfill missing"}
+              </Button>
+              {backfillState.attempted > 0 && (
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Reattempted {backfillState.attempted} patients across {backfillState.passes} passes.
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="mb-2 text-sm text-muted-foreground">
                 Step 2 — Extract wound fields with Lovable AI
               </div>
               <Button onClick={() => extract.mutate()} disabled={extract.isPending}>
