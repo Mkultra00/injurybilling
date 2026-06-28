@@ -79,13 +79,13 @@ function RunsPage() {
                 Step 1 — Ingest from PCC (per facility; rate-limit aware)
               </div>
               <div className="flex gap-2">
-                {(["A", "B", "C"] as const).map((f) => (
+                {FACILITIES.map((f) => (
                   <Button
-                    key={f}
-                    onClick={() => ingest.mutate(f)}
+                    key={f.id}
+                    onClick={() => ingest.mutate(f.id)}
                     disabled={ingest.isPending}
                   >
-                    {ingest.isPending && ingest.variables === f ? `Ingesting ${f}…` : `Ingest facility ${f}`}
+                    {ingest.isPending && ingest.variables === f.id ? `Ingesting ${f.label}…` : `Ingest ${f.label}`}
                   </Button>
                 ))}
               </div>
