@@ -90,6 +90,13 @@ function VoiceAgentInner({ screenContext }: { screenContext?: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Debounced screen-update push while connected
+  useEffect(() => {
+    if (!connected || !screenContext) return;
+    const t = setTimeout(() => sendScreen("update"), 800);
+    return () => clearTimeout(t);
+  }, [connected, screenContext, sendScreen]);
+
   if (!open) {
     return (
       <Button
