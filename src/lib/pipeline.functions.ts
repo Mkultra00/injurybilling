@@ -270,19 +270,26 @@ export const runExtraction = createServerFn({ method: "POST" })
   .handler(async () => {
     
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { generateText, Output } = await import("ai");
+    const { generateObject } = await import("ai");
     const { createLovableAiGatewayProvider } = await import("@/lib/ai-gateway.server");
 
     const key = process.env.LOVABLE_API_KEY;
     if (!key) throw new Error("LOVABLE_API_KEY missing");
     const gateway = createLovableAiGatewayProvider(key);
-    const model = gateway("google/gemini-3-flash-preview");
+    const model = gateway("google/gemini-2.5-flash");
 
     // Already-extracted source_ids
     const { data: doneRows } = await supabaseAdmin
       .from("wound_extractions")
-      .select("source_table, source_id");
+      .select("source_table, source_id")
+      .not("wound_type", "is", null);
     const done = new Set((doneRows ?? []).map((r) => `${r.source_table}:${r.source_id}`));
+
+    // Clear previous failed placeholder rows so we retry
+    await supabaseAdmin
+      .from("wound_extractions")
+      .delete()
+      .is("wound_type", null);
 
     const { data: notes } = await supabaseAdmin
       .from("raw_notes")
@@ -322,16 +329,17 @@ export const runExtraction = createServerFn({ method: "POST" })
 
     await pLimit(items, 4, async (item) => {
       try {
-        const result = await generateText({
+        const result = await generateObject({
           model,
           system: EXTRACTION_SYSTEM_PROMPT,
           prompt: item.text,
-          experimental_output: Output.object({ schema: ExtractionSchema as any }),
+          schema: ExtractionSchema as any,
         } as any);
-        const parsed = (result as any).experimental_output as
+        const parsed = (result as any).object as
           | { wounds: any[]; extraction_notes: string | null }
           | undefined;
         if (!parsed) throw new Error("no structured output");
+
         if (!parsed.wounds.length) {
           await supabaseAdmin.from("wound_extractions").insert({
             source_table: item.source_table,
