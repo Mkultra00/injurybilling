@@ -8,6 +8,7 @@ import { Mic, MicOff, X } from "lucide-react";
 import { toast } from "sonner";
 
 const STORAGE_KEY = "wellator_elevenlabs_agent_id";
+const DEFAULT_AGENT_ID = "agent_0701kw2dyj7fe5kanmp80fq5ncwb";
 
 export function VoiceAgent() {
   return (
