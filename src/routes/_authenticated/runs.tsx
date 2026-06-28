@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { getRuns, runIngestion, runExtraction, runRules, FACILITIES } from "@/lib/pipeline.functions";
+import { getRuns, runIngestion, runExtraction, runRules, runBackfill, FACILITIES } from "@/lib/pipeline.functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
