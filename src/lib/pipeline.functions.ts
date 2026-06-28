@@ -76,7 +76,7 @@ export const runIngestion = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z.object({ facility_id: z.union(FACILITY_IDS.map((id) => z.literal(id)) as any) }).parse(input),
   )
-  .handler(async ({ data, context }) => {
+  .handler(async ({ data }) => {
     
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const base = process.env.PCC_API_BASE_URL || PCC_BASE_DEFAULT;
@@ -267,7 +267,7 @@ function noteAsText(row: { body?: string | null; payload: any; format?: string |
 }
 
 export const runExtraction = createServerFn({ method: "POST" })
-  .handler(async ({ context }) => {
+  .handler(async () => {
     
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { generateText, Output } = await import("ai");
@@ -412,7 +412,7 @@ function hasActivePartB(coveragePayload: any): boolean {
 }
 
 export const runRules = createServerFn({ method: "POST" })
-  .handler(async ({ context }) => {
+  .handler(async () => {
     
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
@@ -474,7 +474,7 @@ export const runRules = createServerFn({ method: "POST" })
 // ---------- 4. ORCHESTRATOR ----------
 
 export const runFullPipeline = createServerFn({ method: "POST" })
-  .handler(async ({ context }) => {
+  .handler(async () => {
     
     return { ok: true as const, note: "Run each step from /runs." };
   });
@@ -482,7 +482,7 @@ export const runFullPipeline = createServerFn({ method: "POST" })
 // ---------- Dashboard reads ----------
 
 export const getDashboard = createServerFn({ method: "GET" })
-  .handler(async ({ context }) => {
+  .handler(async () => {
     const { data, error } = await (await import("@/integrations/supabase/client.server")).supabaseAdmin
       .from("eligibility_output")
       .select("*")
@@ -496,7 +496,7 @@ export const getPatientDetail = createServerFn({ method: "POST" })
   .inputValidator((input: unknown) =>
     z.object({ patient_id: z.string() }).parse(input),
   )
-  .handler(async ({ data, context }) => {
+  .handler(async ({ data }) => {
     const pid = data.patient_id;
     const [elig, extractions, notes, coverage] = await Promise.all([
       (await import("@/integrations/supabase/client.server")).supabaseAdmin.from("eligibility_output").select("*").eq("patient_id", pid).maybeSingle(),
@@ -513,7 +513,7 @@ export const getPatientDetail = createServerFn({ method: "POST" })
   });
 
 export const getRuns = createServerFn({ method: "GET" })
-  .handler(async ({ context }) => {
+  .handler(async () => {
     const { data, error } = await (await import("@/integrations/supabase/client.server")).supabaseAdmin
       .from("pipeline_runs")
       .select("*")
