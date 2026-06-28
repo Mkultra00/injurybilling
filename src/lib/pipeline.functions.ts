@@ -1,6 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
-import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { ExtractionSchema, EXTRACTION_SYSTEM_PROMPT } from "@/lib/wellator/extraction-schema";
 import { decideEligibility, pickPrimary } from "@/lib/wellator/rules";
 import type { ExtractionRow } from "@/lib/wellator/types";
@@ -74,12 +73,11 @@ async function pLimit<T>(items: T[], limit: number, worker: (item: T) => Promise
 // ---------- 1. INGESTION ----------
 
 export const runIngestion = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
     z.object({ facility_id: z.union(FACILITY_IDS.map((id) => z.literal(id)) as any) }).parse(input),
   )
-  .handler(async ({ data, context }) => {
-    await ensureAdmin(context);
+  .handler(async ({ data }) => {
+    
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const base = process.env.PCC_API_BASE_URL || PCC_BASE_DEFAULT;
     const key = process.env.PCC_API_KEY;
@@ -269,9 +267,8 @@ function noteAsText(row: { body?: string | null; payload: any; format?: string |
 }
 
 export const runExtraction = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    await ensureAdmin(context);
+  .handler(async () => {
+    
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { generateText, Output } = await import("ai");
     const { createLovableAiGatewayProvider } = await import("@/lib/ai-gateway.server");
@@ -415,9 +412,8 @@ function hasActivePartB(coveragePayload: any): boolean {
 }
 
 export const runRules = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    await ensureAdmin(context);
+  .handler(async () => {
+    
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
     const { data: patients } = await supabaseAdmin
@@ -478,18 +474,16 @@ export const runRules = createServerFn({ method: "POST" })
 // ---------- 4. ORCHESTRATOR ----------
 
 export const runFullPipeline = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    await ensureAdmin(context);
+  .handler(async () => {
+    
     return { ok: true as const, note: "Run each step from /runs." };
   });
 
 // ---------- Dashboard reads ----------
 
 export const getDashboard = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+  .handler(async () => {
+    const { data, error } = await (await import("@/integrations/supabase/client.server")).supabaseAdmin
       .from("eligibility_output")
       .select("*")
       .order("facility")
@@ -499,17 +493,16 @@ export const getDashboard = createServerFn({ method: "GET" })
   });
 
 export const getPatientDetail = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) =>
     z.object({ patient_id: z.string() }).parse(input),
   )
-  .handler(async ({ data, context }) => {
+  .handler(async ({ data }) => {
     const pid = data.patient_id;
     const [elig, extractions, notes, coverage] = await Promise.all([
-      context.supabase.from("eligibility_output").select("*").eq("patient_id", pid).maybeSingle(),
-      context.supabase.from("wound_extractions").select("*").eq("patient_id", pid),
-      context.supabase.from("raw_notes").select("*").eq("patient_id", pid),
-      context.supabase.from("raw_coverage").select("*").eq("patient_id", pid).maybeSingle(),
+      (await import("@/integrations/supabase/client.server")).supabaseAdmin.from("eligibility_output").select("*").eq("patient_id", pid).maybeSingle(),
+      (await import("@/integrations/supabase/client.server")).supabaseAdmin.from("wound_extractions").select("*").eq("patient_id", pid),
+      (await import("@/integrations/supabase/client.server")).supabaseAdmin.from("raw_notes").select("*").eq("patient_id", pid),
+      (await import("@/integrations/supabase/client.server")).supabaseAdmin.from("raw_coverage").select("*").eq("patient_id", pid).maybeSingle(),
     ]);
     return {
       eligibility: elig.data ?? null,
@@ -520,9 +513,8 @@ export const getPatientDetail = createServerFn({ method: "POST" })
   });
 
 export const getRuns = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const { data, error } = await context.supabase
+  .handler(async () => {
+    const { data, error } = await (await import("@/integrations/supabase/client.server")).supabaseAdmin
       .from("pipeline_runs")
       .select("*")
       .order("started_at", { ascending: false })
