@@ -37,6 +37,13 @@ function RunsPage() {
   const qc = useQueryClient();
 
   const { data: runs = [] } = useQuery({ queryKey: ["runs"], queryFn: () => getR() });
+  const getCounts = useServerFn(getTableCounts);
+  const { data: counts = [] } = useQuery({
+    queryKey: ["table-counts"],
+    queryFn: () => getCounts(),
+    refetchInterval: 5000,
+  });
+
 
   const [backfillState, setBackfillState] = useState<{
     running: boolean; passes: number; remaining: number; attempted: number;
