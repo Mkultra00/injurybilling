@@ -15,6 +15,76 @@ const PCC_BASE_DEFAULT = "https://hackathon.prod.pulsefoundry.ai";
 
 // ---------- helpers ----------
 
+// Regex-based wound extractor — fallback when the LLM returns nothing parseable.
+// Looks for wound type, stage, location, dimensions (LxWxD cm), and drainage.
+function regexExtractWounds(text: string): { wounds: any[]; extraction_notes: string | null } {
+  if (!text) return { wounds: [], extraction_notes: "empty source" };
+  const t = text.toLowerCase();
+
+  const typeMap: Array<[RegExp, string]> = [
+    [/\b(pressure\s*(ulcer|injury|sore)|decubitus|bed\s*sore)\b/, "pressure_ulcer"],
+    [/\b(diabetic\s*(foot\s*)?ulcer|dfu|neuropathic\s*ulcer)\b/, "diabetic_ulcer"],
+    [/\b(venous\s*(stasis\s*)?ulcer|vlu)\b/, "venous_ulcer"],
+    [/\b(arterial\s*ulcer|ischemic\s*ulcer)\b/, "arterial_ulcer"],
+    [/\b(surgical\s*(wound|incision)|post[-\s]?op(erative)?\s*wound|dehiscence)\b/, "surgical_wound"],
+    [/\b(traumatic\s*wound|laceration|abrasion|puncture\s*wound)\b/, "traumatic_wound"],
+    [/\b(burn|thermal\s*injury|scald)\b/, "burn"],
+    [/\b(skin\s*tear)\b/, "skin_tear"],
+  ];
+  let wound_type: string | null = null;
+  for (const [re, label] of typeMap) {
+    if (re.test(t)) { wound_type = label; break; }
+  }
+  if (!wound_type && /\b(wound|ulcer|lesion)\b/.test(t)) wound_type = "other";
+  if (!wound_type) return { wounds: [], extraction_notes: "regex: no wound mentioned" };
+
+  const stageMatch = t.match(/\bstage\s*(1|2|3|4|i{1,3}v?|iv)\b/);
+  const stageMap: Record<string, string> = {
+    "1": "stage_1", i: "stage_1",
+    "2": "stage_2", ii: "stage_2",
+    "3": "stage_3", iii: "stage_3",
+    "4": "stage_4", iv: "stage_4",
+  };
+  let wound_stage: string | null = stageMatch ? stageMap[stageMatch[1]] ?? null : null;
+  if (!wound_stage && /\bunstageable\b/.test(t)) wound_stage = "unstageable";
+  if (!wound_stage && /\bdeep\s*tissue\s*injury|dti\b/.test(t)) wound_stage = "deep_tissue_injury";
+
+  const dim = t.match(/(\d+(?:\.\d+)?)\s*(?:cm)?\s*[x×]\s*(\d+(?:\.\d+)?)\s*(?:cm)?(?:\s*[x×]\s*(\d+(?:\.\d+)?))?\s*cm?/);
+  const length_cm = dim ? parseFloat(dim[1]) : null;
+  const width_cm = dim ? parseFloat(dim[2]) : null;
+  const depth_cm = dim && dim[3] ? parseFloat(dim[3]) : null;
+
+  const drainageMatch = t.match(/\b(no|none|scant|small|minimal|moderate|large|copious|heavy)\b[^.]{0,30}\b(drainage|exudate|discharge)\b/);
+  let drainage: string | null = null;
+  if (drainageMatch) {
+    const d = drainageMatch[1];
+    drainage = d === "no" || d === "none" ? "none"
+      : d === "scant" || d === "minimal" || d === "small" ? "scant"
+      : d === "moderate" ? "moderate"
+      : "large";
+  }
+
+  const locMatch = t.match(/\b(?:on|at|over|to)\s+(?:the\s+)?(left|right|bilateral)?\s*(sacrum|sacral|heel|coccyx|ischium|trochanter|hip|ankle|foot|toe|leg|calf|knee|elbow|shoulder|back|buttock|abdomen|chest|arm|hand|finger)/);
+  const location = locMatch ? `${locMatch[1] ?? ""} ${locMatch[2]}`.trim() : null;
+
+  return {
+    wounds: [{
+      wound_type,
+      wound_stage,
+      location,
+      length_cm,
+      width_cm,
+      depth_cm,
+      drainage,
+      is_primary_wound: true,
+      confidence: "low",
+      source_quote: null,
+    }],
+    extraction_notes: "regex fallback",
+  };
+}
+
+
 async function ensureAdmin(ctx: { supabase: any; userId: string }) {
   const { data, error } = await ctx.supabase
     .from("user_roles")
@@ -320,7 +390,7 @@ export const runExtraction = createServerFn({ method: "POST" })
   .handler(async () => {
     
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { generateObject } = await import("ai");
+    const { generateText } = await import("ai");
     const { createLovableAiGatewayProvider } = await import("@/lib/ai-gateway.server");
 
     const key = process.env.LOVABLE_API_KEY;
@@ -379,16 +449,25 @@ export const runExtraction = createServerFn({ method: "POST" })
 
     await pLimit(items, 4, async (item) => {
       try {
-        const result = await generateObject({
-          model,
-          system: EXTRACTION_SYSTEM_PROMPT,
-          prompt: item.text,
-          schema: ExtractionSchema as any,
-        } as any);
-        const parsed = (result as any).object as
-          | { wounds: any[]; extraction_notes: string | null }
-          | undefined;
-        if (!parsed) throw new Error("no structured output");
+        // Try LLM JSON extraction first
+        let parsed: { wounds: any[]; extraction_notes: string | null } | null = null;
+        try {
+          const result = await generateText({
+            model,
+            system: EXTRACTION_SYSTEM_PROMPT + "\n\nRespond with ONLY valid JSON matching: {\"wounds\":[{\"wound_type\":\"pressure_ulcer|diabetic_ulcer|venous_ulcer|arterial_ulcer|surgical_wound|traumatic_wound|burn|skin_tear|other|none\",\"wound_stage\":\"stage_1|stage_2|stage_3|stage_4|unstageable|deep_tissue_injury|null\",\"location\":\"string|null\",\"length_cm\":number|null,\"width_cm\":number|null,\"depth_cm\":number|null,\"drainage\":\"none|scant|small|moderate|large|null\",\"is_primary_wound\":boolean,\"confidence\":\"high|medium|low\",\"source_quote\":\"string|null\"}],\"extraction_notes\":\"string|null\"}. No prose, no markdown fences.",
+            prompt: item.text,
+          } as any);
+          const raw = (result as any).text as string;
+          const jsonMatch = raw.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            try { parsed = JSON.parse(jsonMatch[0]); } catch { parsed = null; }
+          }
+        } catch { /* fallthrough to regex */ }
+
+        // Regex fallback if LLM produced nothing usable
+        if (!parsed || !Array.isArray(parsed.wounds)) {
+          parsed = regexExtractWounds(item.text);
+        }
 
         if (!parsed.wounds.length) {
           await supabaseAdmin.from("wound_extractions").insert({
@@ -407,17 +486,17 @@ export const runExtraction = createServerFn({ method: "POST" })
                 source_table: item.source_table,
                 source_id: item.source_id,
                 patient_id: item.patient_id,
-                wound_type: w.wound_type,
-                wound_stage: w.wound_stage,
-                location: w.location,
-                length_cm: w.length_cm,
-                width_cm: w.width_cm,
-                depth_cm: w.depth_cm,
-                drainage: w.drainage,
-                is_primary_wound: w.is_primary_wound,
-                confidence: w.confidence,
+                wound_type: w.wound_type ?? null,
+                wound_stage: w.wound_stage ?? null,
+                location: w.location ?? null,
+                length_cm: w.length_cm ?? null,
+                width_cm: w.width_cm ?? null,
+                depth_cm: w.depth_cm ?? null,
+                drainage: w.drainage ?? null,
+                is_primary_wound: w.is_primary_wound ?? null,
+                confidence: w.confidence ?? "low",
                 extraction_notes: parsed.extraction_notes,
-                source_quote: w.source_quote,
+                source_quote: w.source_quote ?? null,
                 raw_json: w,
               },
               { onConflict: "source_table,source_id,wound_type,location" },
