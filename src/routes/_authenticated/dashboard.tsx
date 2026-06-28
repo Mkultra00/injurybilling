@@ -89,10 +89,11 @@ function Dashboard() {
       </header>
 
       <main className="mx-auto max-w-7xl space-y-6 p-6">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+          <StatCard label="Eligible for billing" value={counts.eligible} tone="blue" />
           <StatCard label="Auto-accept" value={counts.auto_accept} tone="green" />
           <StatCard label="Flag for review" value={counts.flag_for_review} tone="amber" />
-          <StatCard label="Reject" value={counts.reject} tone="red" />
+          <StatCard label="Not eligible" value={counts.reject} tone="red" />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
