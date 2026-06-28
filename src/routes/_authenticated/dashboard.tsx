@@ -142,6 +142,7 @@ function Dashboard() {
                   <TableRow>
                     <TableHead>Patient</TableHead>
                     <TableHead>Facility</TableHead>
+                    <TableHead>Billing eligible</TableHead>
                     <TableHead>Decision</TableHead>
                     <TableHead>Routing reason</TableHead>
                     <TableHead className="w-20" />
@@ -152,6 +153,13 @@ function Dashboard() {
                     <TableRow key={r.patient_id}>
                       <TableCell className="font-mono text-xs">{r.patient_id}</TableCell>
                       <TableCell>{r.facility}</TableCell>
+                      <TableCell>
+                        {isEligible(r.decision) ? (
+                          <Badge className="bg-blue-600 text-white hover:bg-blue-600">Eligible</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-muted-foreground">Not eligible</Badge>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={DECISION_COLORS[r.decision] ?? ""}>
                           {r.decision.replace(/_/g, " ")}
