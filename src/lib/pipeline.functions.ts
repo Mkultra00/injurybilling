@@ -596,6 +596,23 @@ export const getRuns = createServerFn({ method: "GET" })
     return data ?? [];
   });
 
+export const getTableCounts = createServerFn({ method: "GET" })
+  .handler(async () => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const tables = [
+      "raw_patients", "raw_diagnoses", "raw_coverage", "raw_notes",
+      "raw_assessments", "wound_extractions", "eligibility_output", "ingest_failures",
+    ] as const;
+    const counts = await Promise.all(
+      tables.map(async (t) => {
+        const { count } = await supabaseAdmin.from(t).select("*", { count: "exact", head: true });
+        return { table: t, count: count ?? 0 };
+      }),
+    );
+    return counts;
+  });
+
+
 // ---------- 5. BACKFILL ----------
 // Re-fetch sub-resources for any patient missing data, and drain ingest_failures.
 // Caller (UI) invokes this repeatedly until counters report no more missing.
