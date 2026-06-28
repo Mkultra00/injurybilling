@@ -191,9 +191,11 @@ function Dashboard() {
           <PatientDrillDown data={detailQ.data} />
         )}
       </main>
+      <VoiceAgent />
     </div>
   );
 }
+
 
 function StatCard({ label, value, tone }: { label: string; value: number; tone: "green" | "amber" | "red" | "blue" }) {
   const cls = {
