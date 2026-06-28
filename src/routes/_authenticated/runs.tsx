@@ -170,14 +170,37 @@ function RunsPage() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Extraction failed"),
   });
   const decide = useMutation({
-    mutationFn: () => rules(),
+    mutationFn: (patient_ids?: string[]) => rules({ data: patient_ids ? { patient_ids } : {} }),
     onSuccess: (r) => {
       toast.success(`Decisions written for ${r.written} patients`);
       qc.invalidateQueries({ queryKey: ["dashboard"] });
       qc.invalidateQueries({ queryKey: ["runs"] });
+      qc.invalidateQueries({ queryKey: ["rules-preview"] });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Rules failed"),
   });
+
+  // ----- Preview / commit auto-accepts -----
+  const previewFn = useServerFn(previewRules);
+  const [showPreview, setShowPreview] = useState(false);
+  const preview = useQuery({
+    queryKey: ["rules-preview"],
+    queryFn: () => previewFn(),
+    enabled: showPreview,
+  });
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [decisionFilter, setDecisionFilter] = useState<"auto_accept" | "flag_for_review" | "reject" | "all">("auto_accept");
+  const filteredRows = (preview.data?.rows ?? []).filter(
+    (r) => decisionFilter === "all" || r.decision === decisionFilter,
+  );
+  const selectedIds = Object.keys(selected).filter((k) => selected[k]);
+  const allChecked = filteredRows.length > 0 && filteredRows.every((r) => selected[r.patient_id]);
+  const toggleAll = () => {
+    const next = { ...selected };
+    if (allChecked) filteredRows.forEach((r) => delete next[r.patient_id]);
+    else filteredRows.forEach((r) => (next[r.patient_id] = true));
+    setSelected(next);
+  };
 
   return (
     <div className="min-h-screen bg-background">
