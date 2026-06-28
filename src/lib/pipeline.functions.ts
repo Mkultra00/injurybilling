@@ -15,6 +15,76 @@ const PCC_BASE_DEFAULT = "https://hackathon.prod.pulsefoundry.ai";
 
 // ---------- helpers ----------
 
+// Regex-based wound extractor — fallback when the LLM returns nothing parseable.
+// Looks for wound type, stage, location, dimensions (LxWxD cm), and drainage.
+function regexExtractWounds(text: string): { wounds: any[]; extraction_notes: string | null } {
+  if (!text) return { wounds: [], extraction_notes: "empty source" };
+  const t = text.toLowerCase();
+
+  const typeMap: Array<[RegExp, string]> = [
+    [/\b(pressure\s*(ulcer|injury|sore)|decubitus|bed\s*sore)\b/, "pressure_ulcer"],
+    [/\b(diabetic\s*(foot\s*)?ulcer|dfu|neuropathic\s*ulcer)\b/, "diabetic_ulcer"],
+    [/\b(venous\s*(stasis\s*)?ulcer|vlu)\b/, "venous_ulcer"],
+    [/\b(arterial\s*ulcer|ischemic\s*ulcer)\b/, "arterial_ulcer"],
+    [/\b(surgical\s*(wound|incision)|post[-\s]?op(erative)?\s*wound|dehiscence)\b/, "surgical_wound"],
+    [/\b(traumatic\s*wound|laceration|abrasion|puncture\s*wound)\b/, "traumatic_wound"],
+    [/\b(burn|thermal\s*injury|scald)\b/, "burn"],
+    [/\b(skin\s*tear)\b/, "skin_tear"],
+  ];
+  let wound_type: string | null = null;
+  for (const [re, label] of typeMap) {
+    if (re.test(t)) { wound_type = label; break; }
+  }
+  if (!wound_type && /\b(wound|ulcer|lesion)\b/.test(t)) wound_type = "other";
+  if (!wound_type) return { wounds: [], extraction_notes: "regex: no wound mentioned" };
+
+  const stageMatch = t.match(/\bstage\s*(1|2|3|4|i{1,3}v?|iv)\b/);
+  const stageMap: Record<string, string> = {
+    "1": "stage_1", i: "stage_1",
+    "2": "stage_2", ii: "stage_2",
+    "3": "stage_3", iii: "stage_3",
+    "4": "stage_4", iv: "stage_4",
+  };
+  let wound_stage: string | null = stageMatch ? stageMap[stageMatch[1]] ?? null : null;
+  if (!wound_stage && /\bunstageable\b/.test(t)) wound_stage = "unstageable";
+  if (!wound_stage && /\bdeep\s*tissue\s*injury|dti\b/.test(t)) wound_stage = "deep_tissue_injury";
+
+  const dim = t.match(/(\d+(?:\.\d+)?)\s*(?:cm)?\s*[x×]\s*(\d+(?:\.\d+)?)\s*(?:cm)?(?:\s*[x×]\s*(\d+(?:\.\d+)?))?\s*cm?/);
+  const length_cm = dim ? parseFloat(dim[1]) : null;
+  const width_cm = dim ? parseFloat(dim[2]) : null;
+  const depth_cm = dim && dim[3] ? parseFloat(dim[3]) : null;
+
+  const drainageMatch = t.match(/\b(no|none|scant|small|minimal|moderate|large|copious|heavy)\b[^.]{0,30}\b(drainage|exudate|discharge)\b/);
+  let drainage: string | null = null;
+  if (drainageMatch) {
+    const d = drainageMatch[1];
+    drainage = d === "no" || d === "none" ? "none"
+      : d === "scant" || d === "minimal" || d === "small" ? "scant"
+      : d === "moderate" ? "moderate"
+      : "large";
+  }
+
+  const locMatch = t.match(/\b(?:on|at|over|to)\s+(?:the\s+)?(left|right|bilateral)?\s*(sacrum|sacral|heel|coccyx|ischium|trochanter|hip|ankle|foot|toe|leg|calf|knee|elbow|shoulder|back|buttock|abdomen|chest|arm|hand|finger)/);
+  const location = locMatch ? `${locMatch[1] ?? ""} ${locMatch[2]}`.trim() : null;
+
+  return {
+    wounds: [{
+      wound_type,
+      wound_stage,
+      location,
+      length_cm,
+      width_cm,
+      depth_cm,
+      drainage,
+      is_primary_wound: true,
+      confidence: "low",
+      source_quote: null,
+    }],
+    extraction_notes: "regex fallback",
+  };
+}
+
+
 async function ensureAdmin(ctx: { supabase: any; userId: string }) {
   const { data, error } = await ctx.supabase
     .from("user_roles")
