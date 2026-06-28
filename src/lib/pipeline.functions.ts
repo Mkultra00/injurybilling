@@ -163,93 +163,12 @@ export const runIngestion = createServerFn({ method: "POST" })
       );
 
       await pLimit(patients, 4, async (p) => {
-        const pidStr = p.patient_id; // FA-001 — for diagnoses/coverage
-        const pidNum = p.id; // 1 — for notes/assessments
-        try {
-          // diagnoses (string id)
-          const dxResp = await fetchWithRetry(
-            `${base}/pcc/diagnoses?patient_id=${encodeURIComponent(pidStr)}`,
-            { headers },
-            counters,
-          );
-          if (dxResp.ok) {
-            const list: any[] = await dxResp.json();
-            if (Array.isArray(list) && list.length) {
-              await supabaseAdmin.from("raw_diagnoses").upsert(
-                list.map((d) => ({
-                  id: String(d.id ?? `${pidStr}-${d.icd10_code ?? d.code ?? Math.random()}`),
-                  patient_id: pidStr,
-                  payload: d,
-                })),
-                { onConflict: "id" },
-              );
-            }
-          }
-
-          // coverage (string id) — list of coverage records
-          const covResp = await fetchWithRetry(
-            `${base}/pcc/coverage?patient_id=${encodeURIComponent(pidStr)}`,
-            { headers },
-            counters,
-          );
-          if (covResp.ok) {
-            const cov = await covResp.json();
-            await supabaseAdmin.from("raw_coverage").upsert(
-              { patient_id: pidStr, payload: cov, fetched_at: new Date().toISOString() },
-              { onConflict: "patient_id" },
-            );
-          }
-
-          // notes (numeric id)
-          const notesResp = await fetchWithRetry(
-            `${base}/pcc/notes?patient_id=${pidNum}`,
-            { headers },
-            counters,
-          );
-          if (notesResp.ok) {
-            const list: any[] = await notesResp.json();
-            if (Array.isArray(list) && list.length) {
-              await supabaseAdmin.from("raw_notes").upsert(
-                list.map((n) => ({
-                  id: String(n.pcc_note_id ?? n.id ?? `${pidStr}-n-${Math.random()}`),
-                  patient_id: pidStr,
-                  format: n.note_type ?? null,
-                  body: n.note_text ?? null,
-                  payload: n,
-                })),
-                { onConflict: "id" },
-              );
-            }
-          }
-
-          // assessments (numeric id)
-          const aResp = await fetchWithRetry(
-            `${base}/pcc/assessments?patient_id=${pidNum}`,
-            { headers },
-            counters,
-          );
-          if (aResp.ok) {
-            const list: any[] = await aResp.json();
-            if (Array.isArray(list) && list.length) {
-              await supabaseAdmin.from("raw_assessments").upsert(
-                list.map((a) => ({
-                  id: String(a.pcc_assessment_id ?? a.id ?? `${pidStr}-a-${Math.random()}`),
-                  patient_id: pidStr,
-                  payload: a,
-                })),
-                { onConflict: "id" },
-              );
-            }
-          }
-          processed++;
-        } catch (e) {
-          await supabaseAdmin.from("ingest_failures").insert({
-            patient_id: pidStr,
-            endpoint: "patient-detail",
-            error: String(e instanceof Error ? e.message : e),
-          });
-        }
+        const pidStr = p.patient_id;
+        const pidNum = p.id;
+        await ingestOnePatient(supabaseAdmin, base, headers, counters, pidStr, pidNum);
+        processed++;
       });
+
 
       await supabaseAdmin
         .from("pipeline_runs")
