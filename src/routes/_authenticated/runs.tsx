@@ -271,7 +271,7 @@ function RunsPage() {
               <div className="mb-2 text-sm text-muted-foreground">
                 Step 1b — Backfill missing data (20-retry, drains failure queue, loops until done)
               </div>
-              <Button onClick={runBackfillLoop} disabled={backfillState.running} variant="secondary">
+              <Button onClick={() => runBackfillLoop()} disabled={backfillState.running} variant="secondary">
                 {backfillState.running
                   ? `Backfilling… pass ${backfillState.passes}, ${backfillState.remaining} remaining`
                   : "Backfill missing"}
