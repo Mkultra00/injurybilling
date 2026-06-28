@@ -34,14 +34,24 @@ function RunsPage() {
 
   const { data: runs = [] } = useQuery({ queryKey: ["runs"], queryFn: () => getR() });
 
-  const ingest = useMutation({
-    mutationFn: (facility_id: number) => ing({ data: { facility_id } }),
-    onSuccess: (r) => {
-      toast.success(`Ingested ${r.facility}: ${r.processed} patients (${r.http_429s} 429s)`);
-      qc.invalidateQueries({ queryKey: ["runs"] });
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Ingestion failed"),
-  });
+  const useIngestFor = (facility_id: number) =>
+    useMutation({
+      mutationKey: ["ingest", facility_id],
+      mutationFn: () => ing({ data: { facility_id } }),
+      onSuccess: (r) => {
+        toast.success(`Ingested ${r.facility}: ${r.processed} patients (${r.http_429s} 429s)`);
+        qc.invalidateQueries({ queryKey: ["runs"] });
+      },
+      onError: (e) => toast.error(e instanceof Error ? e.message : "Ingestion failed"),
+    });
+  const ingestA = useIngestFor(101);
+  const ingestB = useIngestFor(102);
+  const ingestC = useIngestFor(103);
+  const ingestByFacility: Record<number, ReturnType<typeof useIngestFor>> = {
+    101: ingestA,
+    102: ingestB,
+    103: ingestC,
+  };
   const extract = useMutation({
     mutationFn: () => ext(),
     onSuccess: (r) =>
