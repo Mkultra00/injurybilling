@@ -53,11 +53,14 @@ function Dashboard() {
     queryFn: () => detail({ data: { patient_id: openPid! } }),
   });
 
+  const isEligible = (d: string) => d === "auto_accept" || d === "flag_for_review";
+
   const filtered = rows.filter(
     (r) => (!facility || r.facility === facility) && (!decision || r.decision === decision),
   );
 
   const counts = {
+    eligible: rows.filter((r) => isEligible(r.decision)).length,
     auto_accept: rows.filter((r) => r.decision === "auto_accept").length,
     flag_for_review: rows.filter((r) => r.decision === "flag_for_review").length,
     reject: rows.filter((r) => r.decision === "reject").length,
@@ -86,10 +89,11 @@ function Dashboard() {
       </header>
 
       <main className="mx-auto max-w-7xl space-y-6 p-6">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+          <StatCard label="Eligible for billing" value={counts.eligible} tone="blue" />
           <StatCard label="Auto-accept" value={counts.auto_accept} tone="green" />
           <StatCard label="Flag for review" value={counts.flag_for_review} tone="amber" />
-          <StatCard label="Reject" value={counts.reject} tone="red" />
+          <StatCard label="Not eligible" value={counts.reject} tone="red" />
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -138,6 +142,7 @@ function Dashboard() {
                   <TableRow>
                     <TableHead>Patient</TableHead>
                     <TableHead>Facility</TableHead>
+                    <TableHead>Billing eligible</TableHead>
                     <TableHead>Decision</TableHead>
                     <TableHead>Routing reason</TableHead>
                     <TableHead className="w-20" />
@@ -148,6 +153,13 @@ function Dashboard() {
                     <TableRow key={r.patient_id}>
                       <TableCell className="font-mono text-xs">{r.patient_id}</TableCell>
                       <TableCell>{r.facility}</TableCell>
+                      <TableCell>
+                        {isEligible(r.decision) ? (
+                          <Badge className="bg-blue-600 text-white hover:bg-blue-600">Eligible</Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-muted-foreground">Not eligible</Badge>
+                        )}
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={DECISION_COLORS[r.decision] ?? ""}>
                           {r.decision.replace(/_/g, " ")}
@@ -179,11 +191,12 @@ function Dashboard() {
   );
 }
 
-function StatCard({ label, value, tone }: { label: string; value: number; tone: "green" | "amber" | "red" }) {
+function StatCard({ label, value, tone }: { label: string; value: number; tone: "green" | "amber" | "red" | "blue" }) {
   const cls = {
     green: "border-green-200 bg-green-50",
     amber: "border-amber-200 bg-amber-50",
     red: "border-red-200 bg-red-50",
+    blue: "border-blue-300 bg-blue-50",
   }[tone];
   return (
     <Card className={cls}>
