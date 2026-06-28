@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { ConversationProvider, useConversation } from "@elevenlabs/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,15 +10,15 @@ import { toast } from "sonner";
 const STORAGE_KEY = "wellator_elevenlabs_agent_id";
 const DEFAULT_AGENT_ID = "agent_0701kw2dyj7fe5kanmp80fq5ncwb";
 
-export function VoiceAgent() {
+export function VoiceAgent({ screenContext }: { screenContext?: string }) {
   return (
     <ConversationProvider>
-      <VoiceAgentInner />
+      <VoiceAgentInner screenContext={screenContext} />
     </ConversationProvider>
   );
 }
 
-function VoiceAgentInner() {
+function VoiceAgentInner({ screenContext }: { screenContext?: string }) {
 
   const [open, setOpen] = useState(false);
   const [agentId, setAgentId] = useState<string>(
