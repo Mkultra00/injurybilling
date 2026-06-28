@@ -62,9 +62,12 @@ export function VoiceAgent() {
   useEffect(() => {
     return () => {
       if (conversation.status === "connected") {
-        conversation.endSession().catch(() => {});
+        try { conversation.endSession(); } catch { /* noop */ }
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
