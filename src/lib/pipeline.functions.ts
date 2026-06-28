@@ -379,16 +379,25 @@ export const runExtraction = createServerFn({ method: "POST" })
 
     await pLimit(items, 4, async (item) => {
       try {
-        const result = await generateObject({
-          model,
-          system: EXTRACTION_SYSTEM_PROMPT,
-          prompt: item.text,
-          schema: ExtractionSchema as any,
-        } as any);
-        const parsed = (result as any).object as
-          | { wounds: any[]; extraction_notes: string | null }
-          | undefined;
-        if (!parsed) throw new Error("no structured output");
+        // Try LLM JSON extraction first
+        let parsed: { wounds: any[]; extraction_notes: string | null } | null = null;
+        try {
+          const result = await generateText({
+            model,
+            system: EXTRACTION_SYSTEM_PROMPT + "\n\nRespond with ONLY valid JSON matching: {\"wounds\":[{\"wound_type\":\"pressure_ulcer|diabetic_ulcer|venous_ulcer|arterial_ulcer|surgical_wound|traumatic_wound|burn|skin_tear|other|none\",\"wound_stage\":\"stage_1|stage_2|stage_3|stage_4|unstageable|deep_tissue_injury|null\",\"location\":\"string|null\",\"length_cm\":number|null,\"width_cm\":number|null,\"depth_cm\":number|null,\"drainage\":\"none|scant|small|moderate|large|null\",\"is_primary_wound\":boolean,\"confidence\":\"high|medium|low\",\"source_quote\":\"string|null\"}],\"extraction_notes\":\"string|null\"}. No prose, no markdown fences.",
+            prompt: item.text,
+          } as any);
+          const raw = (result as any).text as string;
+          const jsonMatch = raw.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            try { parsed = JSON.parse(jsonMatch[0]); } catch { parsed = null; }
+          }
+        } catch { /* fallthrough to regex */ }
+
+        // Regex fallback if LLM produced nothing usable
+        if (!parsed || !Array.isArray(parsed.wounds)) {
+          parsed = regexExtractWounds(item.text);
+        }
 
         if (!parsed.wounds.length) {
           await supabaseAdmin.from("wound_extractions").insert({
@@ -407,17 +416,17 @@ export const runExtraction = createServerFn({ method: "POST" })
                 source_table: item.source_table,
                 source_id: item.source_id,
                 patient_id: item.patient_id,
-                wound_type: w.wound_type,
-                wound_stage: w.wound_stage,
-                location: w.location,
-                length_cm: w.length_cm,
-                width_cm: w.width_cm,
-                depth_cm: w.depth_cm,
-                drainage: w.drainage,
-                is_primary_wound: w.is_primary_wound,
-                confidence: w.confidence,
+                wound_type: w.wound_type ?? null,
+                wound_stage: w.wound_stage ?? null,
+                location: w.location ?? null,
+                length_cm: w.length_cm ?? null,
+                width_cm: w.width_cm ?? null,
+                depth_cm: w.depth_cm ?? null,
+                drainage: w.drainage ?? null,
+                is_primary_wound: w.is_primary_wound ?? null,
+                confidence: w.confidence ?? "low",
                 extraction_notes: parsed.extraction_notes,
-                source_quote: w.source_quote,
+                source_quote: w.source_quote ?? null,
                 raw_json: w,
               },
               { onConflict: "source_table,source_id,wound_type,location" },
