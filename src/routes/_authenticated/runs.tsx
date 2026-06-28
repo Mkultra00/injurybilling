@@ -34,14 +34,24 @@ function RunsPage() {
 
   const { data: runs = [] } = useQuery({ queryKey: ["runs"], queryFn: () => getR() });
 
-  const ingest = useMutation({
-    mutationFn: (facility_id: number) => ing({ data: { facility_id } }),
-    onSuccess: (r) => {
-      toast.success(`Ingested ${r.facility}: ${r.processed} patients (${r.http_429s} 429s)`);
-      qc.invalidateQueries({ queryKey: ["runs"] });
-    },
-    onError: (e) => toast.error(e instanceof Error ? e.message : "Ingestion failed"),
-  });
+  const useIngestFor = (facility_id: number) =>
+    useMutation({
+      mutationKey: ["ingest", facility_id],
+      mutationFn: () => ing({ data: { facility_id } }),
+      onSuccess: (r) => {
+        toast.success(`Ingested ${r.facility}: ${r.processed} patients (${r.http_429s} 429s)`);
+        qc.invalidateQueries({ queryKey: ["runs"] });
+      },
+      onError: (e) => toast.error(e instanceof Error ? e.message : "Ingestion failed"),
+    });
+  const ingestA = useIngestFor(101);
+  const ingestB = useIngestFor(102);
+  const ingestC = useIngestFor(103);
+  const ingestByFacility: Record<number, ReturnType<typeof useIngestFor>> = {
+    101: ingestA,
+    102: ingestB,
+    103: ingestC,
+  };
   const extract = useMutation({
     mutationFn: () => ext(),
     onSuccess: (r) =>
@@ -78,16 +88,19 @@ function RunsPage() {
               <div className="mb-2 text-sm text-muted-foreground">
                 Step 1 — Ingest from PCC (per facility; rate-limit aware)
               </div>
-              <div className="flex gap-2">
-                {FACILITIES.map((f) => (
-                  <Button
-                    key={f.id}
-                    onClick={() => ingest.mutate(f.id)}
-                    disabled={ingest.isPending}
-                  >
-                    {ingest.isPending && ingest.variables === f.id ? `Ingesting ${f.label}…` : `Ingest ${f.label}`}
-                  </Button>
-                ))}
+              <div className="flex flex-wrap gap-2">
+                {FACILITIES.map((f) => {
+                  const m = ingestByFacility[f.id];
+                  return (
+                    <Button
+                      key={f.id}
+                      onClick={() => m.mutate()}
+                      disabled={m.isPending}
+                    >
+                      {m.isPending ? `Ingesting ${f.label}…` : `Ingest ${f.label}`}
+                    </Button>
+                  );
+                })}
               </div>
             </div>
             <div>
