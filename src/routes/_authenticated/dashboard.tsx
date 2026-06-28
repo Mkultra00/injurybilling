@@ -183,11 +183,12 @@ function Dashboard() {
   );
 }
 
-function StatCard({ label, value, tone }: { label: string; value: number; tone: "green" | "amber" | "red" }) {
+function StatCard({ label, value, tone }: { label: string; value: number; tone: "green" | "amber" | "red" | "blue" }) {
   const cls = {
     green: "border-green-200 bg-green-50",
     amber: "border-amber-200 bg-amber-50",
     red: "border-red-200 bg-red-50",
+    blue: "border-blue-300 bg-blue-50",
   }[tone];
   return (
     <Card className={cls}>
