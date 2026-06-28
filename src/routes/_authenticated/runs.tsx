@@ -1,7 +1,8 @@
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { getRuns, runIngestion, runExtraction, runRules, FACILITIES } from "@/lib/pipeline.functions";
+import { getRuns, runIngestion, runExtraction, runRules, runBackfill, FACILITIES } from "@/lib/pipeline.functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -32,9 +33,43 @@ function RunsPage() {
   const ing = useServerFn(runIngestion);
   const ext = useServerFn(runExtraction);
   const rules = useServerFn(runRules);
+  const backfill = useServerFn(runBackfill);
   const qc = useQueryClient();
 
   const { data: runs = [] } = useQuery({ queryKey: ["runs"], queryFn: () => getR() });
+
+  const [backfillState, setBackfillState] = useState<{
+    running: boolean; passes: number; remaining: number; attempted: number;
+  }>({ running: false, passes: 0, remaining: 0, attempted: 0 });
+
+  async function runBackfillLoop() {
+    setBackfillState({ running: true, passes: 0, remaining: 0, attempted: 0 });
+    let totalAttempted = 0;
+    for (let pass = 1; pass <= 50; pass++) {
+      try {
+        const r = await backfill();
+        totalAttempted += r.attempted;
+        setBackfillState({
+          running: r.remaining_candidates > 0 || r.attempted > 0,
+          passes: pass,
+          remaining: r.remaining_candidates,
+          attempted: totalAttempted,
+        });
+        if (r.attempted === 0 && r.remaining_candidates === 0) {
+          toast.success(`Backfill complete — ${totalAttempted} patients reattempted across ${pass} passes`);
+          break;
+        }
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Backfill error");
+        break;
+      }
+    }
+    setBackfillState((s) => ({ ...s, running: false }));
+    qc.invalidateQueries({ queryKey: ["runs"] });
+    qc.invalidateQueries({ queryKey: ["dashboard"] });
+  }
+
+
 
   const useIngestFor = (facility_id: number) =>
     useMutation({
@@ -110,6 +145,21 @@ function RunsPage() {
                   );
                 })}
               </div>
+            </div>
+            <div>
+              <div className="mb-2 text-sm text-muted-foreground">
+                Step 1b — Backfill missing data (20-retry, drains failure queue, loops until done)
+              </div>
+              <Button onClick={runBackfillLoop} disabled={backfillState.running} variant="secondary">
+                {backfillState.running
+                  ? `Backfilling… pass ${backfillState.passes}, ${backfillState.remaining} remaining`
+                  : "Backfill missing"}
+              </Button>
+              {backfillState.attempted > 0 && (
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Reattempted {backfillState.attempted} patients across {backfillState.passes} passes.
+                </div>
+              )}
             </div>
             <div>
               <div className="mb-2 text-sm text-muted-foreground">

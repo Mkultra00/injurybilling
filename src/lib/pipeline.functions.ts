@@ -30,33 +30,41 @@ async function fetchWithRetry(
   url: string,
   init: RequestInit,
   counters: { http_429s: number },
-  maxAttempts = 5,
+  maxAttempts = 20,
 ): Promise<Response> {
   let lastErr: unknown;
+  let lastStatus: number | undefined;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       const resp = await fetch(url, init);
+      lastStatus = resp.status;
       if (resp.status === 429) {
         counters.http_429s += 1;
         const retryAfter = Number(resp.headers.get("Retry-After"));
+        // Honor Retry-After but cap at 30s so a single worker invocation
+        // doesn't exceed runtime limits; remaining work falls to backfill.
         const base = Number.isFinite(retryAfter) && retryAfter > 0
-          ? retryAfter * 1000
-          : Math.min(2 ** attempt * 500, 8000);
-        const jitter = Math.floor(Math.random() * 400);
+          ? Math.min(retryAfter * 1000, 30000)
+          : Math.min(2 ** attempt * 400, 15000);
+        const jitter = Math.floor(Math.random() * 500);
         await new Promise((r) => setTimeout(r, base + jitter));
         continue;
       }
       if (!resp.ok && resp.status >= 500) {
-        await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+        await new Promise((r) => setTimeout(r, Math.min(500 * (attempt + 1), 10000)));
         continue;
       }
       return resp;
     } catch (e) {
       lastErr = e;
-      await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+      await new Promise((r) => setTimeout(r, Math.min(500 * (attempt + 1), 10000)));
     }
   }
-  throw new Error(`Exhausted retries for ${url}: ${String(lastErr ?? "unknown")}`);
+  const err: any = new Error(
+    `Exhausted ${maxAttempts} retries for ${url}: ${String(lastErr ?? lastStatus ?? "unknown")}`,
+  );
+  err.status = lastStatus;
+  throw err;
 }
 
 async function pLimit<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
@@ -69,6 +77,111 @@ async function pLimit<T>(items: T[], limit: number, worker: (item: T) => Promise
   });
   await Promise.all(runners);
 }
+
+// Run one endpoint call; on exhaustion log to ingest_failures and return null.
+async function tryEndpoint(
+  supabaseAdmin: any,
+  patient_id: string,
+  endpoint: string,
+  url: string,
+  headers: Record<string, string>,
+  counters: { http_429s: number },
+): Promise<any | null> {
+  try {
+    const resp = await fetchWithRetry(url, { headers }, counters);
+    if (!resp.ok) {
+      await supabaseAdmin.from("ingest_failures").insert({
+        patient_id, endpoint, status: resp.status, error: `HTTP ${resp.status}`,
+      });
+      return null;
+    }
+    // success — clear any prior failure rows for this (patient, endpoint)
+    await supabaseAdmin.from("ingest_failures")
+      .delete().eq("patient_id", patient_id).eq("endpoint", endpoint);
+    return await resp.json();
+  } catch (e: any) {
+    await supabaseAdmin.from("ingest_failures").insert({
+      patient_id, endpoint, status: e?.status ?? null,
+      error: String(e?.message ?? e),
+    });
+    return null;
+  }
+}
+
+// Fetch all sub-resources for a single patient. Each endpoint is independent —
+// one failure logs to ingest_failures but does NOT abort the others.
+async function ingestOnePatient(
+  supabaseAdmin: any,
+  base: string,
+  headers: Record<string, string>,
+  counters: { http_429s: number },
+  pidStr: string,
+  pidNum: number,
+) {
+  // diagnoses
+  const dx = await tryEndpoint(
+    supabaseAdmin, pidStr, "diagnoses",
+    `${base}/pcc/diagnoses?patient_id=${encodeURIComponent(pidStr)}`, headers, counters,
+  );
+  if (Array.isArray(dx) && dx.length) {
+    await supabaseAdmin.from("raw_diagnoses").upsert(
+      dx.map((d: any) => ({
+        id: String(d.id ?? `${pidStr}-${d.icd10_code ?? d.code ?? Math.random()}`),
+        patient_id: pidStr,
+        payload: d,
+      })),
+      { onConflict: "id" },
+    );
+  }
+
+  // coverage
+  const cov = await tryEndpoint(
+    supabaseAdmin, pidStr, "coverage",
+    `${base}/pcc/coverage?patient_id=${encodeURIComponent(pidStr)}`, headers, counters,
+  );
+  if (cov != null) {
+    await supabaseAdmin.from("raw_coverage").upsert(
+      { patient_id: pidStr, payload: cov, fetched_at: new Date().toISOString() },
+      { onConflict: "patient_id" },
+    );
+  }
+
+  // notes
+  const notes = await tryEndpoint(
+    supabaseAdmin, pidStr, "notes",
+    `${base}/pcc/notes?patient_id=${pidNum}`, headers, counters,
+  );
+  if (Array.isArray(notes) && notes.length) {
+    await supabaseAdmin.from("raw_notes").upsert(
+      notes.map((n: any) => ({
+        id: String(n.pcc_note_id ?? n.id ?? `${pidStr}-n-${Math.random()}`),
+        patient_id: pidStr,
+        format: n.note_type ?? null,
+        body: n.note_text ?? null,
+        payload: n,
+      })),
+      { onConflict: "id" },
+    );
+  }
+
+  // assessments
+  const asmts = await tryEndpoint(
+    supabaseAdmin, pidStr, "assessments",
+    `${base}/pcc/assessments?patient_id=${pidNum}`, headers, counters,
+  );
+  if (Array.isArray(asmts) && asmts.length) {
+    await supabaseAdmin.from("raw_assessments").upsert(
+      asmts.map((a: any) => ({
+        id: String(a.pcc_assessment_id ?? a.id ?? `${pidStr}-a-${Math.random()}`),
+        patient_id: pidStr,
+        payload: a,
+      })),
+      { onConflict: "id" },
+    );
+  }
+}
+
+
 
 // ---------- 1. INGESTION ----------
 
@@ -124,93 +237,12 @@ export const runIngestion = createServerFn({ method: "POST" })
       );
 
       await pLimit(patients, 4, async (p) => {
-        const pidStr = p.patient_id; // FA-001 — for diagnoses/coverage
-        const pidNum = p.id; // 1 — for notes/assessments
-        try {
-          // diagnoses (string id)
-          const dxResp = await fetchWithRetry(
-            `${base}/pcc/diagnoses?patient_id=${encodeURIComponent(pidStr)}`,
-            { headers },
-            counters,
-          );
-          if (dxResp.ok) {
-            const list: any[] = await dxResp.json();
-            if (Array.isArray(list) && list.length) {
-              await supabaseAdmin.from("raw_diagnoses").upsert(
-                list.map((d) => ({
-                  id: String(d.id ?? `${pidStr}-${d.icd10_code ?? d.code ?? Math.random()}`),
-                  patient_id: pidStr,
-                  payload: d,
-                })),
-                { onConflict: "id" },
-              );
-            }
-          }
-
-          // coverage (string id) — list of coverage records
-          const covResp = await fetchWithRetry(
-            `${base}/pcc/coverage?patient_id=${encodeURIComponent(pidStr)}`,
-            { headers },
-            counters,
-          );
-          if (covResp.ok) {
-            const cov = await covResp.json();
-            await supabaseAdmin.from("raw_coverage").upsert(
-              { patient_id: pidStr, payload: cov, fetched_at: new Date().toISOString() },
-              { onConflict: "patient_id" },
-            );
-          }
-
-          // notes (numeric id)
-          const notesResp = await fetchWithRetry(
-            `${base}/pcc/notes?patient_id=${pidNum}`,
-            { headers },
-            counters,
-          );
-          if (notesResp.ok) {
-            const list: any[] = await notesResp.json();
-            if (Array.isArray(list) && list.length) {
-              await supabaseAdmin.from("raw_notes").upsert(
-                list.map((n) => ({
-                  id: String(n.pcc_note_id ?? n.id ?? `${pidStr}-n-${Math.random()}`),
-                  patient_id: pidStr,
-                  format: n.note_type ?? null,
-                  body: n.note_text ?? null,
-                  payload: n,
-                })),
-                { onConflict: "id" },
-              );
-            }
-          }
-
-          // assessments (numeric id)
-          const aResp = await fetchWithRetry(
-            `${base}/pcc/assessments?patient_id=${pidNum}`,
-            { headers },
-            counters,
-          );
-          if (aResp.ok) {
-            const list: any[] = await aResp.json();
-            if (Array.isArray(list) && list.length) {
-              await supabaseAdmin.from("raw_assessments").upsert(
-                list.map((a) => ({
-                  id: String(a.pcc_assessment_id ?? a.id ?? `${pidStr}-a-${Math.random()}`),
-                  patient_id: pidStr,
-                  payload: a,
-                })),
-                { onConflict: "id" },
-              );
-            }
-          }
-          processed++;
-        } catch (e) {
-          await supabaseAdmin.from("ingest_failures").insert({
-            patient_id: pidStr,
-            endpoint: "patient-detail",
-            error: String(e instanceof Error ? e.message : e),
-          });
-        }
+        const pidStr = p.patient_id;
+        const pidNum = p.id;
+        await ingestOnePatient(supabaseAdmin, base, headers, counters, pidStr, pidNum);
+        processed++;
       });
+
 
       await supabaseAdmin
         .from("pipeline_runs")
@@ -545,3 +577,72 @@ export const getRuns = createServerFn({ method: "GET" })
     if (error) throw new Error(error.message);
     return data ?? [];
   });
+
+// ---------- 5. BACKFILL ----------
+// Re-fetch sub-resources for any patient missing data, and drain ingest_failures.
+// Caller (UI) invokes this repeatedly until counters report no more missing.
+export const runBackfill = createServerFn({ method: "POST" })
+  .handler(async () => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const base = process.env.PCC_API_BASE_URL || PCC_BASE_DEFAULT;
+    const key = process.env.PCC_API_KEY;
+    const headers: Record<string, string> = { accept: "application/json" };
+    if (key) headers["Authorization"] = `Bearer ${key}`;
+
+    const counters = { http_429s: 0 };
+
+    // Build set of patient_ids that are missing any of the 4 sub-resources.
+    const { data: patients = [] } = await supabaseAdmin
+      .from("raw_patients")
+      .select("patient_id, payload");
+
+    const [{ data: dx = [] }, { data: cov = [] }, { data: notes = [] }, { data: asmts = [] }] =
+      await Promise.all([
+        supabaseAdmin.from("raw_diagnoses").select("patient_id"),
+        supabaseAdmin.from("raw_coverage").select("patient_id"),
+        supabaseAdmin.from("raw_notes").select("patient_id"),
+        supabaseAdmin.from("raw_assessments").select("patient_id"),
+      ]);
+
+    const hasDx = new Set((dx ?? []).map((r: any) => r.patient_id));
+    const hasCov = new Set((cov ?? []).map((r: any) => r.patient_id));
+    const hasNotes = new Set((notes ?? []).map((r: any) => r.patient_id));
+    const hasAsmts = new Set((asmts ?? []).map((r: any) => r.patient_id));
+
+    // Also include patients referenced by recent ingest_failures.
+    const { data: fails = [] } = await supabaseAdmin
+      .from("ingest_failures")
+      .select("patient_id")
+      .limit(2000);
+    const failingPids = new Set((fails ?? []).map((f: any) => f.patient_id).filter(Boolean));
+
+    const candidates = (patients ?? []).filter((p: any) => {
+      const pid = p.patient_id;
+      return failingPids.has(pid) ||
+        !hasDx.has(pid) || !hasCov.has(pid) ||
+        !hasNotes.has(pid) || !hasAsmts.has(pid);
+    });
+
+    // Cap per call so we stay within worker time budget; UI loops until 0.
+    const batch = candidates.slice(0, 25);
+
+    let attempted = 0;
+    await pLimit(batch, 4, async (p: any) => {
+      const pidStr = p.patient_id;
+      const pidNum = (p.payload as any)?.id;
+      if (pidNum == null) return;
+      await ingestOnePatient(supabaseAdmin, base, headers, counters, pidStr, pidNum);
+      attempted++;
+    });
+
+    // Report what's still missing across the whole table after this pass.
+    const remaining = candidates.length - batch.length;
+
+    return {
+      ok: true,
+      attempted,
+      remaining_candidates: remaining,
+      http_429s: counters.http_429s,
+    };
+  });
+
