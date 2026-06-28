@@ -51,14 +51,15 @@ async function fetchWithRetry(
         continue;
       }
       if (!resp.ok && resp.status >= 500) {
-        await new Promise((r) => setTimeout(r, Math.min(500 * (attempt + 1), 10000)));
+        await new Promise((r) => setTimeout(r, 20000));
         continue;
       }
       return resp;
     } catch (e) {
       lastErr = e;
-      await new Promise((r) => setTimeout(r, Math.min(500 * (attempt + 1), 10000)));
+      await new Promise((r) => setTimeout(r, 20000));
     }
+
   }
   const err: any = new Error(
     `Exhausted ${maxAttempts} retries for ${url}: ${String(lastErr ?? lastStatus ?? "unknown")}`,
@@ -210,13 +211,10 @@ export const runIngestion = createServerFn({ method: "POST" })
 
     let processed = 0;
     try {
-      const patientsResp = await fetchWithRetry(
-        `${base}/pcc/patients?facility_id=${facilityId}`,
-        { headers },
-        counters,
-      );
-      if (!patientsResp.ok) throw new Error(`Patients endpoint ${patientsResp.status}`);
-      const patients: Array<{
+      // Patients endpoint goes first — everything else depends on this list.
+      // On failure, wait 20s between attempts (up to 30 tries = ~10 min) so
+      // a transient PCC outage doesn't abort the whole facility's run.
+      let patients: Array<{
         id: number;
         patient_id: string;
         facility_id: number;
@@ -224,7 +222,27 @@ export const runIngestion = createServerFn({ method: "POST" })
         last_name?: string;
         primary_payer_code?: string;
         [k: string]: unknown;
-      }> = await patientsResp.json();
+      }> | null = null;
+      let lastErr: unknown;
+      for (let attempt = 0; attempt < 30; attempt++) {
+        try {
+          const resp = await fetch(
+            `${base}/pcc/patients?facility_id=${facilityId}`,
+            { headers },
+          );
+          if (resp.status === 429) counters.http_429s += 1;
+          if (resp.ok) {
+            patients = await resp.json();
+            break;
+          }
+          lastErr = new Error(`Patients endpoint HTTP ${resp.status}`);
+        } catch (e) {
+          lastErr = e;
+        }
+        await new Promise((r) => setTimeout(r, 20000));
+      }
+      if (!patients) throw lastErr ?? new Error("patients fetch failed");
+
 
       await supabaseAdmin.from("raw_patients").upsert(
         patients.map((p) => ({
