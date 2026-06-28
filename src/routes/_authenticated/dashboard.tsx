@@ -191,9 +191,41 @@ function Dashboard() {
           <PatientDrillDown data={detailQ.data} />
         )}
       </main>
-      <VoiceAgent />
+      <VoiceAgent screenContext={buildScreenContext({
+        facility, decision, counts, filtered, openPid, detail: detailQ.data,
+      })} />
     </div>
   );
+}
+
+function buildScreenContext(s: {
+  facility: string | null;
+  decision: string | null;
+  counts: { eligible: number; auto_accept: number; flag_for_review: number; reject: number };
+  filtered: any[];
+  openPid: string | null;
+  detail: any;
+}): string {
+  const lines: string[] = [];
+  lines.push(`DASHBOARD VIEW — Golden Dawn Billing`);
+  lines.push(`Filters: facility=${s.facility ?? "All"}, decision=${s.decision ?? "All"}`);
+  lines.push(`Counts — eligible:${s.counts.eligible}, auto_accept:${s.counts.auto_accept}, flag_for_review:${s.counts.flag_for_review}, not_eligible:${s.counts.reject}`);
+  lines.push(`Visible patients (${s.filtered.length}):`);
+  for (const r of s.filtered.slice(0, 50)) {
+    lines.push(`- ${r.patient_name ?? "—"} [${r.patient_id}] | ${r.facility} | ${r.decision} | ${r.routing_reason}`);
+  }
+  if (s.filtered.length > 50) lines.push(`...(+${s.filtered.length - 50} more not listed)`);
+  if (s.openPid && s.detail) {
+    const e = s.detail.eligibility;
+    const primary = s.detail.extractions?.find((x: any) => x.id === e?.primary_extraction_id) ?? s.detail.extractions?.[0];
+    lines.push(`\nOPEN PATIENT ${s.openPid}:`);
+    lines.push(`  decision=${e?.decision}, has_partb=${e?.has_partb}, missing=${(e?.missing_fields ?? []).join(",") || "none"}`);
+    if (primary) {
+      lines.push(`  wound_type=${primary.wound_type}, stage=${primary.wound_stage}, location=${primary.location}, size=${primary.length_cm}x${primary.width_cm}x${primary.depth_cm}cm, drainage=${primary.drainage}, confidence=${primary.confidence}`);
+      if (primary.source_quote) lines.push(`  quote: "${primary.source_quote}"`);
+    }
+  }
+  return lines.join("\n");
 }
 
 

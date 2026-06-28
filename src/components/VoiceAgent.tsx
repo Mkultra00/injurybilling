@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { ConversationProvider, useConversation } from "@elevenlabs/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,15 +10,15 @@ import { toast } from "sonner";
 const STORAGE_KEY = "wellator_elevenlabs_agent_id";
 const DEFAULT_AGENT_ID = "agent_0701kw2dyj7fe5kanmp80fq5ncwb";
 
-export function VoiceAgent() {
+export function VoiceAgent({ screenContext }: { screenContext?: string }) {
   return (
     <ConversationProvider>
-      <VoiceAgentInner />
+      <VoiceAgentInner screenContext={screenContext} />
     </ConversationProvider>
   );
 }
 
-function VoiceAgentInner() {
+function VoiceAgentInner({ screenContext }: { screenContext?: string }) {
 
   const [open, setOpen] = useState(false);
   const [agentId, setAgentId] = useState<string>(
@@ -44,6 +44,20 @@ function VoiceAgentInner() {
   const status = conversation.status;
   const connected = status === "connected";
 
+  const lastSentRef = useRef<string>("");
+
+  const sendScreen = useCallback((reason: "initial" | "update") => {
+    if (!screenContext) return;
+    if (screenContext === lastSentRef.current && reason === "update") return;
+    try {
+      const prefix = reason === "initial"
+        ? "Here is what the user is currently seeing on the dashboard. Use it to answer their questions. If they ask about a patient or count, prefer this over your tools:\n\n"
+        : "The dashboard view changed. Updated snapshot:\n\n";
+      conversation.sendContextualUpdate(prefix + screenContext);
+      lastSentRef.current = screenContext;
+    } catch { /* not connected yet */ }
+  }, [conversation, screenContext]);
+
   const start = useCallback(async () => {
     if (!agentId) {
       toast.error("Enter your ElevenLabs Agent ID first");
@@ -56,10 +70,12 @@ function VoiceAgentInner() {
         agentId,
         connectionType: "webrtc",
       });
+      // Push initial screen snapshot
+      setTimeout(() => sendScreen("initial"), 500);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to start session");
     }
-  }, [agentId, conversation]);
+  }, [agentId, conversation, sendScreen]);
 
   const stop = useCallback(async () => {
     await conversation.endSession();
@@ -73,6 +89,13 @@ function VoiceAgentInner() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Debounced screen-update push while connected
+  useEffect(() => {
+    if (!connected || !screenContext) return;
+    const t = setTimeout(() => sendScreen("update"), 800);
+    return () => clearTimeout(t);
+  }, [connected, screenContext, sendScreen]);
 
   if (!open) {
     return (
