@@ -182,9 +182,15 @@ function RunsPage() {
             <CardTitle className="text-base">Run the pipeline</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
+              <div className="mb-2 text-sm font-medium">
+                Run everything — ingest → backfill → extract → rules
+              </div>
+              <Button onClick={runAll} disabled={allState.running} size="lg">
+                {allState.running ? allState.step || "Running…" : "Run full pipeline"}
+              </Button>
+            </div>
             <div>
-              <div className="mb-2 text-sm text-muted-foreground">
-                Step 1 — Ingest from PCC (per facility; rate-limit aware)
 
               </div>
               <div className="flex flex-wrap gap-2">
