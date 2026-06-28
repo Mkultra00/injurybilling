@@ -127,6 +127,7 @@ function RunsPage() {
           remaining: r.remaining_candidates,
           attempted: totalAttempted,
         });
+        onProgress?.(`pass ${pass}, ${r.remaining_candidates} remaining`);
         if (r.attempted === 0 && r.remaining_candidates === 0) {
           toast.success(`Backfill complete — ${totalAttempted} patients reattempted across ${pass} passes`);
           break;
