@@ -544,57 +544,109 @@ function hasActivePartB(coveragePayload: any): boolean {
   });
 }
 
-export const runRules = createServerFn({ method: "POST" })
+async function computeDecisions() {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+  const { data: patients } = await supabaseAdmin
+    .from("raw_patients")
+    .select("patient_id, facility, payload");
+  const { data: coverages } = await supabaseAdmin
+    .from("raw_coverage")
+    .select("patient_id, payload");
+  const covByPid = new Map((coverages ?? []).map((c) => [c.patient_id, c.payload]));
+
+  const { data: extractions } = await supabaseAdmin
+    .from("wound_extractions")
+    .select(
+      "id, source_table, source_id, patient_id, wound_type, wound_stage, location, length_cm, width_cm, depth_cm, drainage, is_primary_wound, confidence, extraction_notes, source_quote",
+    );
+  const extByPid = new Map<string, ExtractionRow[]>();
+  for (const e of extractions ?? []) {
+    const arr = extByPid.get(e.patient_id) ?? [];
+    arr.push(e as ExtractionRow);
+    extByPid.set(e.patient_id, arr);
+  }
+
+  const { data: notes } = await supabaseAdmin.from("raw_notes").select("id, format");
+  const noteFmt = new Map((notes ?? []).map((n) => [n.id, n.format]));
+
+  return (patients ?? []).map((p) => {
+    const ex = extByPid.get(p.patient_id) ?? [];
+    const primary = pickPrimary(ex);
+    const multi = ex.filter((e) => e.wound_type && e.wound_type !== "none").length > 2;
+    const fmt = primary ? noteFmt.get(primary.source_id) ?? null : null;
+    const has_partb = hasActivePartB(covByPid.get(p.patient_id));
+    const decision = decideEligibility({
+      facility: p.facility,
+      has_partb,
+      primary,
+      source_format: fmt,
+      multi_wound_ambiguous: multi,
+    });
+    const pl: any = (p as any).payload ?? {};
+    const patient_name =
+      [pl.first_name, pl.last_name].filter(Boolean).join(" ").trim() || null;
+    return {
+      patient_id: p.patient_id,
+      facility: p.facility,
+      patient_name,
+      has_partb,
+      decision: decision.decision,
+      routing_reason: decision.routing_reason,
+      missing_fields: decision.missing_fields,
+      primary_extraction_id: primary?.id ?? null,
+      primary: primary
+        ? {
+            wound_type: primary.wound_type,
+            wound_stage: primary.wound_stage,
+            location: primary.location,
+            length_cm: primary.length_cm,
+            width_cm: primary.width_cm,
+            depth_cm: primary.depth_cm,
+            drainage: primary.drainage,
+            confidence: primary.confidence,
+            source_format: fmt,
+          }
+        : null,
+    };
+  });
+}
+
+export const previewRules = createServerFn({ method: "GET" })
   .handler(async () => {
-    
+    const rows = await computeDecisions();
+    const counts = {
+      auto_accept: rows.filter((r) => r.decision === "auto_accept").length,
+      flag_for_review: rows.filter((r) => r.decision === "flag_for_review").length,
+      reject: rows.filter((r) => r.decision === "reject").length,
+      total: rows.length,
+    };
+    return { counts, rows };
+  });
+
+export const runRules = createServerFn({ method: "POST" })
+  .inputValidator((input: unknown) =>
+    z
+      .object({ patient_ids: z.array(z.string()).optional() })
+      .optional()
+      .parse(input ?? {}),
+  )
+  .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-
-    const { data: patients } = await supabaseAdmin
-      .from("raw_patients")
-      .select("patient_id, facility");
-    const { data: coverages } = await supabaseAdmin
-      .from("raw_coverage")
-      .select("patient_id, payload");
-    const covByPid = new Map((coverages ?? []).map((c) => [c.patient_id, c.payload]));
-
-    const { data: extractions } = await supabaseAdmin
-      .from("wound_extractions")
-      .select(
-        "id, source_table, source_id, patient_id, wound_type, wound_stage, location, length_cm, width_cm, depth_cm, drainage, is_primary_wound, confidence, extraction_notes, source_quote",
-      );
-    const extByPid = new Map<string, ExtractionRow[]>();
-    for (const e of extractions ?? []) {
-      const arr = extByPid.get(e.patient_id) ?? [];
-      arr.push(e as ExtractionRow);
-      extByPid.set(e.patient_id, arr);
-    }
-
-    const { data: notes } = await supabaseAdmin.from("raw_notes").select("id, format");
-    const noteFmt = new Map((notes ?? []).map((n) => [n.id, n.format]));
-
+    const results = await computeDecisions();
+    const filter = data?.patient_ids ? new Set(data.patient_ids) : null;
+    const toWrite = filter ? results.filter((r) => filter.has(r.patient_id)) : results;
     let written = 0;
-    for (const p of patients ?? []) {
-      const ex = extByPid.get(p.patient_id) ?? [];
-      const primary = pickPrimary(ex);
-      const multi = ex.filter((e) => e.wound_type && e.wound_type !== "none").length > 2;
-      const fmt = primary ? noteFmt.get(primary.source_id) ?? null : null;
-      const has_partb = hasActivePartB(covByPid.get(p.patient_id));
-      const decision = decideEligibility({
-        facility: p.facility,
-        has_partb,
-        primary,
-        source_format: fmt,
-        multi_wound_ambiguous: multi,
-      });
+    for (const r of toWrite) {
       await supabaseAdmin.from("eligibility_output").upsert(
         {
-          patient_id: p.patient_id,
-          facility: p.facility,
-          decision: decision.decision,
-          routing_reason: decision.routing_reason,
-          primary_extraction_id: primary?.id ?? null,
-          has_partb,
-          missing_fields: decision.missing_fields,
+          patient_id: r.patient_id,
+          facility: r.facility,
+          decision: r.decision,
+          routing_reason: r.routing_reason,
+          primary_extraction_id: r.primary_extraction_id,
+          has_partb: r.has_partb,
+          missing_fields: r.missing_fields,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "patient_id" },
