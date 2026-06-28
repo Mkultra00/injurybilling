@@ -44,6 +44,20 @@ function VoiceAgentInner({ screenContext }: { screenContext?: string }) {
   const status = conversation.status;
   const connected = status === "connected";
 
+  const lastSentRef = useRef<string>("");
+
+  const sendScreen = useCallback((reason: "initial" | "update") => {
+    if (!screenContext) return;
+    if (screenContext === lastSentRef.current && reason === "update") return;
+    try {
+      const prefix = reason === "initial"
+        ? "Here is what the user is currently seeing on the dashboard. Use it to answer their questions. If they ask about a patient or count, prefer this over your tools:\n\n"
+        : "The dashboard view changed. Updated snapshot:\n\n";
+      conversation.sendContextualUpdate(prefix + screenContext);
+      lastSentRef.current = screenContext;
+    } catch { /* not connected yet */ }
+  }, [conversation, screenContext]);
+
   const start = useCallback(async () => {
     if (!agentId) {
       toast.error("Enter your ElevenLabs Agent ID first");
@@ -56,10 +70,12 @@ function VoiceAgentInner({ screenContext }: { screenContext?: string }) {
         agentId,
         connectionType: "webrtc",
       });
+      // Push initial screen snapshot
+      setTimeout(() => sendScreen("initial"), 500);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to start session");
     }
-  }, [agentId, conversation]);
+  }, [agentId, conversation, sendScreen]);
 
   const stop = useCallback(async () => {
     await conversation.endSession();
