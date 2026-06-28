@@ -49,6 +49,38 @@ function RunsPage() {
     running: boolean; passes: number; remaining: number; attempted: number;
   }>({ running: false, passes: 0, remaining: 0, attempted: 0 });
 
+  const [allState, setAllState] = useState<{ running: boolean; step: string }>({
+    running: false,
+    step: "",
+  });
+
+  async function runAll() {
+    setAllState({ running: true, step: "Starting…" });
+    try {
+      for (const f of FACILITIES) {
+        setAllState({ running: true, step: `Ingesting ${f.label}…` });
+        const r = await ing({ data: { facility_id: f.id } });
+        toast.success(`Ingested ${f.label}: ${r.processed} patients`);
+      }
+      setAllState({ running: true, step: "Backfilling missing…" });
+      await runBackfillLoop();
+      setAllState({ running: true, step: "Extracting wounds…" });
+      const ex = await ext();
+      toast.success(`Extraction: ${ex.extracted} done, ${ex.failures} failed`);
+      setAllState({ running: true, step: "Applying rules…" });
+      const dr = await rules();
+      toast.success(`Decisions written for ${dr.written} patients`);
+      qc.invalidateQueries({ queryKey: ["runs"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["table-counts"] });
+      toast.success("Full pipeline complete");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Pipeline failed");
+    } finally {
+      setAllState({ running: false, step: "" });
+    }
+  }
+
   async function runBackfillLoop() {
     setBackfillState({ running: true, passes: 0, remaining: 0, attempted: 0 });
     let totalAttempted = 0;
@@ -150,10 +182,17 @@ function RunsPage() {
             <CardTitle className="text-base">Run the pipeline</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="rounded-md border border-primary/30 bg-primary/5 p-3">
+              <div className="mb-2 text-sm font-medium">
+                Run everything — ingest → backfill → extract → rules
+              </div>
+              <Button onClick={runAll} disabled={allState.running} size="lg">
+                {allState.running ? allState.step || "Running…" : "Run full pipeline"}
+              </Button>
+            </div>
             <div>
               <div className="mb-2 text-sm text-muted-foreground">
                 Step 1 — Ingest from PCC (per facility; rate-limit aware)
-
               </div>
               <div className="flex flex-wrap gap-2">
                 {FACILITIES.map((f) => {
