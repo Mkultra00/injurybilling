@@ -448,29 +448,32 @@ export const runExtraction = createServerFn({ method: "POST" })
     let extracted = 0;
 
     await pLimit(items, 4, async (item) => {
+      // Always compute regex baseline first — never fails.
+      const regex = regexExtractWounds(item.text);
+      let parsed: { wounds: any[]; extraction_notes: string | null } = regex;
+
+      // Try LLM to refine; on any failure keep regex result.
       try {
-        // Try LLM JSON extraction first
-        let parsed: { wounds: any[]; extraction_notes: string | null } | null = null;
-        try {
-          const result = await generateText({
-            model,
-            system: EXTRACTION_SYSTEM_PROMPT + "\n\nRespond with ONLY valid JSON matching: {\"wounds\":[{\"wound_type\":\"pressure_ulcer|diabetic_ulcer|venous_ulcer|arterial_ulcer|surgical_wound|traumatic_wound|burn|skin_tear|other|none\",\"wound_stage\":\"stage_1|stage_2|stage_3|stage_4|unstageable|deep_tissue_injury|null\",\"location\":\"string|null\",\"length_cm\":number|null,\"width_cm\":number|null,\"depth_cm\":number|null,\"drainage\":\"none|scant|small|moderate|large|null\",\"is_primary_wound\":boolean,\"confidence\":\"high|medium|low\",\"source_quote\":\"string|null\"}],\"extraction_notes\":\"string|null\"}. No prose, no markdown fences.",
-            prompt: item.text,
-          } as any);
-          const raw = (result as any).text as string;
-          const jsonMatch = raw.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            try { parsed = JSON.parse(jsonMatch[0]); } catch { parsed = null; }
-          }
-        } catch { /* fallthrough to regex */ }
-
-        // Regex fallback if LLM produced nothing usable
-        if (!parsed || !Array.isArray(parsed.wounds)) {
-          parsed = regexExtractWounds(item.text);
+        const result = await generateText({
+          model,
+          system: EXTRACTION_SYSTEM_PROMPT + "\n\nRespond with ONLY valid JSON: {\"wounds\":[{\"wound_type\":\"pressure_ulcer|diabetic_foot_ulcer|venous_ulcer|arterial_ulcer|surgical_site_infection|abscess|burn|null\",\"wound_stage\":\"2|3|4|unstageable|null\",\"location\":\"string|null\",\"length_cm\":number|null,\"width_cm\":number|null,\"depth_cm\":number|null,\"drainage\":\"none|light|moderate|heavy|null\",\"is_primary_wound\":boolean,\"confidence\":\"high|medium|low\",\"source_quote\":\"string|null\"}],\"extraction_notes\":\"string|null\"}. No prose, no markdown.",
+          prompt: item.text,
+        } as any);
+        const raw = (result as any).text as string;
+        const jsonMatch = raw?.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            const llm = JSON.parse(jsonMatch[0]);
+            if (Array.isArray(llm?.wounds) && llm.wounds.length > 0) {
+              parsed = llm;
+            }
+          } catch { /* keep regex */ }
         }
+      } catch { /* keep regex */ }
 
+      try {
         if (!parsed.wounds.length) {
-          await supabaseAdmin.from("wound_extractions").insert({
+          await supabaseAdmin.from("wound_extractions").upsert({
             source_table: item.source_table,
             source_id: item.source_id,
             patient_id: item.patient_id,
@@ -478,7 +481,7 @@ export const runExtraction = createServerFn({ method: "POST" })
             confidence: "high",
             extraction_notes: parsed.extraction_notes ?? "No wound described.",
             raw_json: parsed,
-          });
+          }, { onConflict: "source_table,source_id,wound_type,location" });
         } else {
           for (const w of parsed.wounds) {
             await supabaseAdmin.from("wound_extractions").upsert(
@@ -506,13 +509,6 @@ export const runExtraction = createServerFn({ method: "POST" })
         extracted++;
       } catch (e) {
         failures++;
-        await supabaseAdmin.from("wound_extractions").insert({
-          source_table: item.source_table,
-          source_id: item.source_id,
-          patient_id: item.patient_id,
-          confidence: "low",
-          extraction_notes: `extraction failed: ${e instanceof Error ? e.message : String(e)}`,
-        });
       }
     });
 
