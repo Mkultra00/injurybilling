@@ -242,8 +242,25 @@ export const runIngestion = createServerFn({ method: "POST" })
 
 // ---------- 2. EXTRACTION ----------
 
-function noteAsText(row: { body: string | null; payload: any; format?: string | null }) {
+function noteAsText(row: { body?: string | null; payload: any; format?: string | null }) {
   if (row.body && row.body.trim()) return row.body;
+  // Assessments: PCC ships a structured questionnaire as a JSON string in `raw_json`.
+  const rj = row.payload?.raw_json;
+  if (typeof rj === "string" && rj.trim()) {
+    try {
+      const obj = JSON.parse(rj);
+      const parts: string[] = [];
+      for (const s of obj.sections ?? []) {
+        for (const q of s.questions ?? []) {
+          if (q.answer) parts.push(`${q.question}: ${q.answer}`);
+        }
+      }
+      if (parts.length) return parts.join("\n");
+      return rj;
+    } catch {
+      return rj;
+    }
+  }
   try {
     return JSON.stringify(row.payload).slice(0, 6000);
   } catch {
