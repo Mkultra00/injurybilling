@@ -53,11 +53,14 @@ function Dashboard() {
     queryFn: () => detail({ data: { patient_id: openPid! } }),
   });
 
+  const isEligible = (d: string) => d === "auto_accept" || d === "flag_for_review";
+
   const filtered = rows.filter(
     (r) => (!facility || r.facility === facility) && (!decision || r.decision === decision),
   );
 
   const counts = {
+    eligible: rows.filter((r) => isEligible(r.decision)).length,
     auto_accept: rows.filter((r) => r.decision === "auto_accept").length,
     flag_for_review: rows.filter((r) => r.decision === "flag_for_review").length,
     reject: rows.filter((r) => r.decision === "reject").length,
