@@ -483,13 +483,28 @@ export const runFullPipeline = createServerFn({ method: "POST" })
 
 export const getDashboard = createServerFn({ method: "GET" })
   .handler(async () => {
-    const { data, error } = await (await import("@/integrations/supabase/client.server")).supabaseAdmin
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data, error } = await supabaseAdmin
       .from("eligibility_output")
       .select("*")
       .order("facility")
       .order("decision");
     if (error) throw new Error(error.message);
-    return data ?? [];
+    const rows = data ?? [];
+    const ids = rows.map((r: any) => r.patient_id);
+    const nameById: Record<string, string> = {};
+    if (ids.length) {
+      const { data: pats } = await supabaseAdmin
+        .from("raw_patients")
+        .select("patient_id,payload")
+        .in("patient_id", ids);
+      for (const p of pats ?? []) {
+        const pl: any = (p as any).payload ?? {};
+        const name = [pl.first_name, pl.last_name].filter(Boolean).join(" ").trim();
+        if (name) nameById[(p as any).patient_id] = name;
+      }
+    }
+    return rows.map((r: any) => ({ ...r, patient_name: nameById[r.patient_id] ?? null }));
   });
 
 export const getPatientDetail = createServerFn({ method: "POST" })
