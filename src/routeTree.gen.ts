@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRunsRouteImport } from './routes/_authenticated/runs'
+import { Route as AuthenticatedReferenceDataRouteImport } from './routes/_authenticated/reference-data'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as ApiPublicVoiceAgentRouteImport } from './routes/api/public/voice-agent'
 
@@ -29,6 +30,12 @@ const AuthenticatedRunsRoute = AuthenticatedRunsRouteImport.update({
   path: '/runs',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const AuthenticatedReferenceDataRoute =
+  AuthenticatedReferenceDataRouteImport.update({
+    id: '/reference-data',
+    path: '/reference-data',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
@@ -43,12 +50,14 @@ const ApiPublicVoiceAgentRoute = ApiPublicVoiceAgentRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/reference-data': typeof AuthenticatedReferenceDataRoute
   '/runs': typeof AuthenticatedRunsRoute
   '/api/public/voice-agent': typeof ApiPublicVoiceAgentRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/reference-data': typeof AuthenticatedReferenceDataRoute
   '/runs': typeof AuthenticatedRunsRoute
   '/api/public/voice-agent': typeof ApiPublicVoiceAgentRoute
 }
@@ -57,19 +66,31 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/reference-data': typeof AuthenticatedReferenceDataRoute
   '/_authenticated/runs': typeof AuthenticatedRunsRoute
   '/api/public/voice-agent': typeof ApiPublicVoiceAgentRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/dashboard' | '/runs' | '/api/public/voice-agent'
+  fullPaths:
+    | '/'
+    | '/dashboard'
+    | '/reference-data'
+    | '/runs'
+    | '/api/public/voice-agent'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/dashboard' | '/runs' | '/api/public/voice-agent'
+  to:
+    | '/'
+    | '/dashboard'
+    | '/reference-data'
+    | '/runs'
+    | '/api/public/voice-agent'
   id:
     | '__root__'
     | '/'
     | '/_authenticated'
     | '/_authenticated/dashboard'
+    | '/_authenticated/reference-data'
     | '/_authenticated/runs'
     | '/api/public/voice-agent'
   fileRoutesById: FileRoutesById
@@ -103,6 +124,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedRunsRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/reference-data': {
+      id: '/_authenticated/reference-data'
+      path: '/reference-data'
+      fullPath: '/reference-data'
+      preLoaderRoute: typeof AuthenticatedReferenceDataRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/dashboard': {
       id: '/_authenticated/dashboard'
       path: '/dashboard'
@@ -122,11 +150,13 @@ declare module '@tanstack/react-router' {
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedReferenceDataRoute: typeof AuthenticatedReferenceDataRoute
   AuthenticatedRunsRoute: typeof AuthenticatedRunsRoute
 }
 
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedReferenceDataRoute: AuthenticatedReferenceDataRoute,
   AuthenticatedRunsRoute: AuthenticatedRunsRoute,
 }
 
