@@ -30,33 +30,41 @@ async function fetchWithRetry(
   url: string,
   init: RequestInit,
   counters: { http_429s: number },
-  maxAttempts = 5,
+  maxAttempts = 20,
 ): Promise<Response> {
   let lastErr: unknown;
+  let lastStatus: number | undefined;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       const resp = await fetch(url, init);
+      lastStatus = resp.status;
       if (resp.status === 429) {
         counters.http_429s += 1;
         const retryAfter = Number(resp.headers.get("Retry-After"));
+        // Honor Retry-After but cap at 30s so a single worker invocation
+        // doesn't exceed runtime limits; remaining work falls to backfill.
         const base = Number.isFinite(retryAfter) && retryAfter > 0
-          ? retryAfter * 1000
-          : Math.min(2 ** attempt * 500, 8000);
-        const jitter = Math.floor(Math.random() * 400);
+          ? Math.min(retryAfter * 1000, 30000)
+          : Math.min(2 ** attempt * 400, 15000);
+        const jitter = Math.floor(Math.random() * 500);
         await new Promise((r) => setTimeout(r, base + jitter));
         continue;
       }
       if (!resp.ok && resp.status >= 500) {
-        await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+        await new Promise((r) => setTimeout(r, Math.min(500 * (attempt + 1), 10000)));
         continue;
       }
       return resp;
     } catch (e) {
       lastErr = e;
-      await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+      await new Promise((r) => setTimeout(r, Math.min(500 * (attempt + 1), 10000)));
     }
   }
-  throw new Error(`Exhausted retries for ${url}: ${String(lastErr ?? "unknown")}`);
+  const err: any = new Error(
+    `Exhausted ${maxAttempts} retries for ${url}: ${String(lastErr ?? lastStatus ?? "unknown")}`,
+  );
+  err.status = lastStatus;
+  throw err;
 }
 
 async function pLimit<T>(items: T[], limit: number, worker: (item: T) => Promise<void>) {
@@ -69,6 +77,37 @@ async function pLimit<T>(items: T[], limit: number, worker: (item: T) => Promise
   });
   await Promise.all(runners);
 }
+
+// Run one endpoint call; on exhaustion log to ingest_failures and return null.
+async function tryEndpoint(
+  supabaseAdmin: any,
+  patient_id: string,
+  endpoint: string,
+  url: string,
+  headers: Record<string, string>,
+  counters: { http_429s: number },
+): Promise<any | null> {
+  try {
+    const resp = await fetchWithRetry(url, { headers }, counters);
+    if (!resp.ok) {
+      await supabaseAdmin.from("ingest_failures").insert({
+        patient_id, endpoint, status: resp.status, error: `HTTP ${resp.status}`,
+      });
+      return null;
+    }
+    // success — clear any prior failure rows for this (patient, endpoint)
+    await supabaseAdmin.from("ingest_failures")
+      .delete().eq("patient_id", patient_id).eq("endpoint", endpoint);
+    return await resp.json();
+  } catch (e: any) {
+    await supabaseAdmin.from("ingest_failures").insert({
+      patient_id, endpoint, status: e?.status ?? null,
+      error: String(e?.message ?? e),
+    });
+    return null;
+  }
+}
+
 
 // ---------- 1. INGESTION ----------
 
