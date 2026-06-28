@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { getRuns, runIngestion, runExtraction, runRules } from "@/lib/pipeline.functions";
+import { getRuns, runIngestion, runExtraction, runRules, FACILITIES } from "@/lib/pipeline.functions";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -35,9 +35,9 @@ function RunsPage() {
   const { data: runs = [] } = useQuery({ queryKey: ["runs"], queryFn: () => getR() });
 
   const ingest = useMutation({
-    mutationFn: (facility: "A" | "B" | "C") => ing({ data: { facility } }),
+    mutationFn: (facility_id: number) => ing({ data: { facility_id } }),
     onSuccess: (r) => {
-      toast.success(`Ingested facility ${r.facility}: ${r.processed} patients (${r.http_429s} 429s)`);
+      toast.success(`Ingested ${r.facility}: ${r.processed} patients (${r.http_429s} 429s)`);
       qc.invalidateQueries({ queryKey: ["runs"] });
     },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Ingestion failed"),
