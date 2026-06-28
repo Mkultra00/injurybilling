@@ -1,9 +1,8 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { useState } from "react";
 import { getDashboard, getPatientDetail } from "@/lib/pipeline.functions";
-import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,10 +32,10 @@ const DECISION_COLORS: Record<string, string> = {
 };
 
 function Dashboard() {
-  const navigate = useNavigate();
   const get = useServerFn(getDashboard);
   const detail = useServerFn(getPatientDetail);
   const qc = useQueryClient();
+  void qc;
   const [facility, setFacility] = useState<string | null>(null);
   const [decision, setDecision] = useState<string | null>(null);
   const [openPid, setOpenPid] = useState<string | null>(null);
@@ -62,13 +61,6 @@ function Dashboard() {
     reject: rows.filter((r) => r.decision === "reject").length,
   };
 
-  const signOut = async () => {
-    await qc.cancelQueries();
-    qc.clear();
-    await supabase.auth.signOut();
-    navigate({ to: "/auth", replace: true });
-  };
-
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b">
@@ -82,7 +74,6 @@ function Dashboard() {
               Pipeline runs
             </Link>
           </div>
-          <Button variant="ghost" size="sm" onClick={signOut}>Sign out</Button>
         </div>
       </header>
 
