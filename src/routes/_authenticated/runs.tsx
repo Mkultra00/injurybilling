@@ -98,7 +98,7 @@ function RunsPage() {
       }
       updateStep("rules", "running");
       try {
-        const dr = await rules();
+        const dr = await rules({ data: {} });
         updateStep("rules", "done", `${dr.written} decisions`);
       } catch (e) {
         updateStep("rules", "error", e instanceof Error ? e.message : "failed");
