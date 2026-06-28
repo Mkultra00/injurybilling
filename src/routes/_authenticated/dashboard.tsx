@@ -95,7 +95,7 @@ function Dashboard() {
 
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm text-muted-foreground">Facility:</span>
-          {[null, "A", "B", "C"].map((f) => (
+          {[null, "Facility A", "Facility B", "Facility C"].map((f) => (
             <Button
               key={String(f)}
               variant={facility === f ? "default" : "outline"}
