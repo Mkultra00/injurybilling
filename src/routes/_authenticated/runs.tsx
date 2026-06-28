@@ -32,9 +32,15 @@ function RunsPage() {
   const ing = useServerFn(runIngestion);
   const ext = useServerFn(runExtraction);
   const rules = useServerFn(runRules);
+  const backfill = useServerFn(runBackfill);
   const qc = useQueryClient();
 
   const { data: runs = [] } = useQuery({ queryKey: ["runs"], queryFn: () => getR() });
+
+  const [backfillState, setBackfillState] = (require("react") as typeof import("react")).useState<{
+    running: boolean; passes: number; remaining: number; attempted: number;
+  }>({ running: false, passes: 0, remaining: 0, attempted: 0 });
+
 
   const useIngestFor = (facility_id: number) =>
     useMutation({
