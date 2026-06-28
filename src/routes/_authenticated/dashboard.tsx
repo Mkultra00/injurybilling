@@ -32,10 +32,10 @@ const DECISION_COLORS: Record<string, string> = {
 };
 
 function Dashboard() {
-  const navigate = useNavigate();
   const get = useServerFn(getDashboard);
   const detail = useServerFn(getPatientDetail);
   const qc = useQueryClient();
+  void qc;
   const [facility, setFacility] = useState<string | null>(null);
   const [decision, setDecision] = useState<string | null>(null);
   const [openPid, setOpenPid] = useState<string | null>(null);
