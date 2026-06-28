@@ -22,7 +22,7 @@ function VoiceAgentInner() {
 
   const [open, setOpen] = useState(false);
   const [agentId, setAgentId] = useState<string>(
-    () => (typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY)) || "",
+    () => (typeof window !== "undefined" && localStorage.getItem(STORAGE_KEY)) || DEFAULT_AGENT_ID,
   );
   const [transcript, setTranscript] = useState<
     Array<{ role: "user" | "agent"; text: string }>
