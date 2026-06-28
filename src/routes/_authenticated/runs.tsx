@@ -5,6 +5,8 @@ import { getRuns, runIngestion, runExtraction, runRules, FACILITIES } from "@/li
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import brandAvatar from "@/assets/golden-dawn-avatar.webp.asset.json";
 import { toast } from "sonner";
 import {
   Table,
@@ -72,7 +74,13 @@ function RunsPage() {
     <div className="min-h-screen bg-background">
       <header className="border-b">
         <div className="mx-auto flex max-w-7xl items-center justify-between p-4">
-          <h1 className="text-xl font-semibold">Pipeline runs</h1>
+          <div className="flex items-center gap-3">
+            <Avatar className="h-10 w-10 border">
+              <AvatarImage src={brandAvatar.url} alt="Golden Dawn Billing" />
+              <AvatarFallback>GD</AvatarFallback>
+            </Avatar>
+            <h1 className="text-xl font-semibold">Golden Dawn Billing — Pipeline runs</h1>
+          </div>
           <a href="/dashboard" className="text-sm text-muted-foreground hover:text-foreground">
             ← Dashboard
           </a>
